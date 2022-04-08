@@ -1,0 +1,111 @@
+# .bashrc
+
+# User specific aliases and functions
+
+# Source global definitions
+if [ -f /etc/bashrc ]; then
+	. /etc/bashrc
+fi
+
+
+# 
+# *****************************************************************
+# *                                                               *
+# *    Copyright (c) Digital Equipment Corporation, 1991, 1994    *
+# *                                                               *
+# *   All Rights Reserved.  Unpublished rights  reserved  under   *
+# *   the copyright laws of the United States.                    *
+# *                                                               *
+# *   The software contained on this media  is  proprietary  to   *
+# *   and  embodies  the  confidential  technology  of  Digital   *
+# *   Equipment Corporation.  Possession, use,  duplication  or   *
+# *   dissemination of the software and media is authorized only  *
+# *   pursuant to a valid written license from Digital Equipment  *
+# *   Corporation.                                                *
+# *                                                               *
+# *   RESTRICTED RIGHTS LEGEND   Use, duplication, or disclosure  *
+# *   by the U.S. Government is subject to restrictions  as  set  *
+# *   forth in Subparagraph (c)(1)(ii)  of  DFARS  252.227-7013,  *
+# *   or  in  FAR 52.227-19, as applicable.                       *
+# *                                                               *
+# *****************************************************************
+#
+# HISTORY
+# 
+# @(#)$RCSfile: .profile,v $ $Revision: 4.1.3.4 $ (DEC) $Date: 1992/09/30 13:49:15 $ 
+# 
+PS1="<\!> $USER at `hostname`: "
+
+#ORACLE_BASE=/u01/app/oracle
+#ORACLE_BASE=/opt/oracle
+ORACLE_BASE=/home/oracle/app/oracle/product
+export ORACLE_BASE
+ORACLE_HOME=$ORACLE_BASE/11.2.0/dbhome_1
+#ORACLE_HOME=/usr/lib/oracle/11.2/client64/
+export ORACLE_HOME
+ORACLE_DOC=$ORACLE_HOME/doc
+#ORACLE_SID=gla101
+#ORACLE_SID=orclfire
+ORACLE_SID=csdbora
+
+export ORACLE_SID
+
+#export ORACLE_HOME=/usr/lib/oracle/11.2/client64
+#export ORACLE_SID=CSDBORA
+#export PATH=$PATH:/usr/lib/oracle/11.2/client64/bin
+#export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/lib/oracle/11.2/client64/lib
+
+
+ORACLE_TERM=vt100
+#setenv TWO_TASK comets
+#JAVA_HOME=/usr/local/jdk1.7.0_03
+JAVA_HOME=/usr/local/jdk1.8.0_121
+export JAVA_HOME
+
+#CATALINA_HOME=/usr/local/jakarta-tomcat-4.1.31
+CATALINA_HOME=/usr/local/apache-tomcat-7.0.26
+export CATALINA_HOME
+TOMCAT_HOME=$CATALINA_HOME
+export TOMCAT_HOME
+
+#J2EE_HOME=/usr/local/jdk1.7.0_03
+J2EE_HOME=/usr/local/jdk1.8.0_121
+export J2EE_HOME
+ANT_HOME=/usr/local/jakarta-ant-1.4.1
+export ANT_HOME
+#
+#PATH=.:$HOME/bin:/usr/ucb:/usr/local/bin:/bin:/usr/bin:/usr/local/teTeX/bin/sparc-sun-solaris2.9:$JAVA_HOME/bin/sparcv9:$JAVA_HOME/bin:$J2EE_HOME/bin:$ANT_HOME/bin:$ORACLE_HOME/bin:/usr/games/bin:/usr/gnu/bin:/usr/local/mysql/bin:/sbin:/usr/sbin:/usr/local/bin/netpbm:/usr/local/bin/mail:/usr/local/bin/X11:/usr/local/src/ns-allinone-2.27/bin:/usr/local/src/ns-allinone-2.27/ns-2.27/indep-utils/cmu-scen-gen/setdest:/usr/X/bin
+#
+PATH=/usr/local/apache2/bin:$ORACLE_HOME/bin:/usr/local/mysql/bin:/usr/ccs/bin:/usr/local/adabas/bin:/usr/local/adabas/pgm:.:$JAVA_HOME/bin:/usr/local/j2sdkee1.3.1/bin:/usr/local/bin:/usr/ucb:/usr/local/jakarta-ant-1.4.1/bin:/u01/app/oracle/product/10.1.0/db_1/bin:/usr/games/bin:/usr/gnu/bin:/usr/local/sbin:/usr/local/etc:/usr/local/bin:/usr/local/bin/netpbm:/usr/local/bin/mail-utils:/usr/local/bin/chinese:/usr/local/bin/mail:/usr/local/bin/X11:/usr/local/teTeX/bin/sparc-sun-solaris2.9:/sbin:/usr/sbin:/usr/ucb:/etc:/usr/etc:/bin:/usr/bin:/usr/bin/X11:/usr/tex/lib/latex2htmldir:/usr/ccs/bin:/opt/SUNWspci2/bin:/usr/X/bin
+#
+export PATH
+#stty dec
+tset -I -Q
+#PS1="`hostname`> "
+#MAIL=/usr/spool/mail/$USER
+MAIL=$HOME/Mail/mbox
+alias ls-syslog='ls -lst /usr/local/adm/log'
+alias ls-syslog-comets='ls -lst /mnt/nfs/comets/usr/local/adm/syslog'
+alias ls-syslog-god='ls -lst /mnt/nfs/godzilla/usr1/local/adm/syslog'
+
+alias tail-http='tail /usr/local/apache/logs/access_log'
+alias less-http='less /usr/local/apache/logs/access_log'
+alias tail-mes='tail /usr/local/adm/log/messages'
+alias less-mes='less /usr/local/adm/log/messages'
+alias tail-mail='tail /usr/local/adm/log/maillog'
+alias less-mail='less /usr/local/adm/log/maillog'
+alias less-mail-comets='less /mnt/nfs/comets/usr/local/adm/syslog/mail.debug.log'
+alias tail-mail-comets='tail /mnt/nfs/comets/usr/local/adm/syslog/mail.debug.log'
+alias less-mail-god='less /mnt/nfs/godzilla/usr1/local/adm/syslog/mail.debug.log'
+alias tail-mail-god='tail /mnt/nfs/godzilla/usr1/local/adm/syslog/mail.debug.log'
+#
+#LD_LIBRARY_PATH=.:$ORACLE_HOME/lib32:$ORACLE_HOME/lib:/usr/local/lib
+LD_LIBRARY_PATH=.:/usr/local/lib:$ORACLE_HOME/lib:$CATALINA_HOME/shared/classes:/usr/local/apache2/lib
+export LD_LIBRARY_PATH
+alias rm='rm -i'
+
+CLASSPATH=.:$ORACLE_HOME/lib:$ORACLE_HOME/jdbc/lib:$CATALINA_HOME/classes:$CATALINA_HOME/lib:$ORACLE_HOME/jdbc/lib/classes12.zip:$ORACLE_HOME/jdbc/lib/ojdbc14_g.jar:$ORACLE_HOME/jdbc/lib/ojdbc6.jar:$ORACLE_HOME/jlib/orai18n.jar:$ORACLE_HOME/sqldeveloper/jdbc/lib/ojdbc5.jar:$ORACLE_HOME/jdbc/lib/ojdbc5.jar.jar:$ORACLE_HOME/jdbc/lib/ojdbc6_g.jar.jar:$ORACLE_HOME/classes:$CATALINA_HOME/shared/classes:$CATALINA_HOME/lib:$CATALINA_HOME/lib/servlet-api.jar:$JAVA_HOME/lib:$J2EE_HOME/lib:$J2EE_HOME/lib:$CATALINA_HOME/shared/classes/oracle/jdbc/OracleConnection.class:$CATALINA_HOME/shared/classes/oracle/jdbc/pool/OracleDataSource.class
+J2EE_CLASSPATH=$CLASSPATH
+
+export CLASSPATH
+export J2EE_CLASSPATH
