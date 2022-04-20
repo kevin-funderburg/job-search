@@ -1,0 +1,455 @@
+/*******************************************************************
+ANSI Dynamic Demo 2:  ANSI Dynamic SQL with reference semantics,
+                           batch processing and global descriptor
+                           names in host variables
+                           
+This program demonstates using ANSI Dynamic SQL to process SQL
+statements which are not known until runtime.  It uses the Oracle
+extensions for batch processing and reference semantics.
+
+The program connects you to ORACLE using your username and password,
+then prompts you for a SQL statement.  Enter legal SQL or PL/SQL 
+statement using interactive, not embedded, SQL syntax, terminating the 
+statement with a seimcolon.  Your statement will be processed.  If it
+is a query, the fetched rows are displayed. 
+
+If your statement has input bind variables (other than in a where clause),
+the program will ask for an input array size and then allow you to enter 
+that number of input values. If your statment has output, the program will
+ask you for an output array size and will do array fetchng using that value.
+It will also output the rows fetched in one batch together, so using a small
+value for the output array size will improve the look of the output.  
+For example, connected as scott/tiger, try select empno, ename from emp
+with an output array size of 4;
+
+You can enter multi-line statements.  The limit is 1023 characters.
+There is a limit on the size of the variables, MAX_VAR_LEN, defined as 255.
+This program processes up to 40 bind variables and 40 select-list items.
+
+Precompile with program with dynamic=ansi, i.e:
+ 
+proc dynamic=ansi ansidyn2
+
+*******************************************************************/
+
+#include <stdio.h>
+#include <string.h>
+#include <setjmp.h>
+#include <stdlib.h>
+#include <sqlcpr.h>
+
+
+#define MAX_OCCURENCES  40
+#define MAX_ARRSZ      100
+#define MAX_VAR_LEN    255
+#define MAX_NAME_LEN    31
+
+#ifndef NULL
+#define NULL  0
+#endif
+
+
+/* Prototypes */
+#if defined(__STDC__)
+  void sql_error(void);
+  int oracle_connect(void);
+  int get_dyn_statement(void);
+  int process_input(void);
+  int process_output(void);
+  void rows_processed(void);
+  void help(void);
+#else
+  void sql_error(/*_ void _*/);
+  int oracle_connect(/*_ void _*/);
+  int get_dyn_statement(/* void _*/);
+  int process_input(/*_ void _*/);
+  int process_output(/*_ void _*/);
+  void rows_processed(/*_ void _*/);
+  void help(/*_ void _*/);
+#endif
+
+EXEC SQL INCLUDE sqlca;
+
+/* global variables */
+char    dyn_statement[1024];                      /* statement variable     */
+EXEC SQL VAR dyn_statement IS STRING(1024);
+
+char  indesc[]="input_descriptor";                /* descriptor names       */
+char outdesc[]="output_descriptor";
+char   input[MAX_OCCURENCES][MAX_ARRSZ][MAX_VAR_LEN +1 ],    /* data areas */
+      output[MAX_OCCURENCES][MAX_ARRSZ][MAX_VAR_LEN + 1];
+
+short outindi[MAX_OCCURENCES][MAX_ARRSZ];        /* output indicators      */
+short *iptr;
+
+int   in_array_size;           /* size of input batch, i.e., number of rows */
+int   out_array_size;          /* size of input batch, i.e., number of rows */
+int   max_array_size=MAX_ARRSZ;   /* maximum arrays size used for allocates */
+
+char *dml_commands[] = {"SELECT", "select", "INSERT", "insert",
+                        "UPDATE", "update", "DELETE", "delete"};
+
+int select_found, cursor_open = 0;
+
+/* Define a buffer to hold longjmp state info. */
+jmp_buf jmp_continue;
+
+/* A global flag for the error routine. */
+int parse_flag = 0;
+
+void main()
+{
+
+    /* Connect to the database. */
+    if (oracle_connect() != 0)
+        exit(1);
+
+    EXEC SQL WHENEVER SQLERROR DO sql_error();
+
+    /* Allocate the input and output descriptors. */
+    EXEC SQL FOR :max_array_size
+             ALLOCATE DESCRIPTOR GLOBAL :indesc;
+    EXEC SQL FOR :max_array_size
+             ALLOCATE DESCRIPTOR GLOBAL :outdesc;
+
+    /* Process SQL statements. */
+    for (;;) 
+    {
+        (void) setjmp(jmp_continue);
+
+        /* Get the statement.  Break on "exit". */
+        if (get_dyn_statement() != 0)
+            break;
+
+        /* Prepare the statement and declare a cursor. */
+        parse_flag = 1;     /* Set a flag for sql_error(). */
+        EXEC SQL PREPARE S FROM :dyn_statement;
+        parse_flag = 0;     /* Unset the flag. */
+
+        EXEC SQL DECLARE C CURSOR FOR S;
+
+        /* Call the function that processes the input. */
+        if (process_input())
+            exit(1);
+
+        /* Open the cursor and execute the statement. */
+        EXEC SQL FOR :in_array_size
+            OPEN C USING DESCRIPTOR GLOBAL :indesc;
+        cursor_open = 1;
+ 
+        /* Call the function that processes the output. */
+        if (process_output())
+            exit(1);
+
+        /* Tell user how many rows were processed. */
+        rows_processed();
+
+    }   /* end of for(;;) statement-processing loop */
+
+ 
+    /* Close the cursor. */
+    if (cursor_open)
+      EXEC SQL CLOSE C;
+
+    /* Deallocate the descriptors */
+    EXEC SQL DEALLOCATE DESCRIPTOR GLOBAL :indesc;
+    EXEC SQL DEALLOCATE DESCRIPTOR GLOBAL :outdesc;
+
+    EXEC SQL WHENEVER SQLERROR CONTINUE;
+    EXEC SQL COMMIT WORK RELEASE;
+    puts("\nHave a good day!\n");
+
+    EXEC SQL WHENEVER SQLERROR DO sql_error();
+    return;
+}
+
+
+
+int get_dyn_statement()
+{
+    char *cp, linebuf[256];
+    int iter, plsql;
+
+    for (plsql = 0, iter = 1; ;)
+    {
+        if (iter == 1)
+        {
+            printf("\nSQL> ");
+            dyn_statement[0] = '\0';
+            select_found = 0;
+        }
+        
+        fgets(linebuf, sizeof linebuf, stdin);
+
+        cp = strrchr(linebuf, '\n');
+        if (cp && cp != linebuf)
+            *cp = ' ';
+        else if (cp == linebuf)
+            continue;
+
+        if ((strncmp(linebuf, "SELECT", 6) == 0) ||
+            (strncmp(linebuf, "select", 6) == 0))
+        {
+            select_found=1;;
+        }
+
+        if ((strncmp(linebuf, "EXIT", 4) == 0) ||
+            (strncmp(linebuf, "exit", 4) == 0))
+        {
+            return -1;
+        }
+
+        else if (linebuf[0] == '?' ||
+            (strncmp(linebuf, "HELP", 4) == 0) ||
+            (strncmp(linebuf, "help", 4) == 0))
+        {
+            help();
+            iter = 1;
+            continue;
+        }
+
+        if (strstr(linebuf, "BEGIN") ||
+            (strstr(linebuf, "begin")))
+        {
+            plsql = 1;
+        }
+
+        strcat(dyn_statement, linebuf);
+
+        if ((plsql && (cp = strrchr(dyn_statement, '/'))) ||
+            (!plsql && (cp = strrchr(dyn_statement, ';'))))
+        {
+            *cp = '\0';
+            break;
+        }
+        else
+        {
+            iter++;
+            printf("%3d  ", iter);
+        }
+    }
+    return 0;
+}
+
+
+int process_input()
+{
+    int i, j;
+    char name[31];
+    int  input_count, input_len= MAX_VAR_LEN;
+    int  occurs, string_type = 5;
+    int  string_len;
+    char arr_size[3];
+
+    EXEC SQL DESCRIBE INPUT S USING DESCRIPTOR GLOBAL :indesc;
+    EXEC SQL GET DESCRIPTOR GLOBAL :indesc :input_count = COUNT; 
+
+    if (input_count > 0 && !select_found )
+       {     /* get input array size */
+          printf ("\nEnter value for input array size (max is %d) :  ", 
+                           max_array_size);
+        fgets(arr_size, 4, stdin);
+        in_array_size = atoi(arr_size); 
+       }
+    else
+       { 
+         in_array_size = 1;
+       }
+    for (i=0; i < input_count; i++)
+    {
+        occurs = i +1;                       /* occurence is 1 based */
+        EXEC SQL GET DESCRIPTOR GLOBAL :indesc 
+                 VALUE :occurs :name = NAME;
+
+        for (j=0; j < in_array_size; j++)
+        {
+          if (in_array_size == 1)
+            printf ("\nEnter value for input variable %*.*s:  ",10,31, name);
+          else 
+            printf ("\nEnter %d%s value for input variable %*.*s:  ",
+               j +1, ((j==0) ?  "st" :  (j==1) ? "nd" : (j==2) ? "rd" :"th"),
+                      10,31, name);
+          fgets(input[i][j], sizeof(input[i][j]), stdin);
+          string_len = strlen(input[i][j]);
+          input[i][j][string_len - 1 ] = '\0';   /* change \n to \0 */
+        }
+        EXEC SQL SET DESCRIPTOR GLOBAL :indesc
+                 VALUE :occurs TYPE = :string_type, LENGTH = :input_len;
+        EXEC SQL FOR :in_array_size
+                 SET DESCRIPTOR GLOBAL :indesc
+                     VALUE :occurs  REF DATA = :input[i];
+    }
+
+    return(sqlca.sqlcode);
+}
+
+
+int process_output()
+{
+   int i, j;
+   int output_count, occurs;
+   int type, output_len= MAX_VAR_LEN;
+   char name[MAX_OCCURENCES][MAX_NAME_LEN];
+   int rows_this_fetch=0, cumulative_rows=0;
+   char arr_size[3];
+   if (!select_found)
+      return(0);   
+   EXEC SQL DESCRIBE OUTPUT S USING DESCRIPTOR GLOBAL :outdesc;
+   
+   EXEC SQL GET DESCRIPTOR GLOBAL :outdesc :output_count = COUNT;
+  
+   if (output_count > 0 )
+      {
+        printf ("\nEnter value for output array size (max is %d) :  ", 
+                       max_array_size);
+        fgets(arr_size, 4, stdin);
+        out_array_size = atoi(arr_size); 
+      }
+   if (out_array_size < 1)    /* must have at least one */
+       out_array_size = 1;
+
+   printf ("\n");
+   
+   for (i = 0; i < output_count; i++)
+   {
+      occurs = i + 1;
+      EXEC SQL GET DESCRIPTOR GLOBAL :outdesc VALUE :occurs
+               :type = TYPE, :name[i] = NAME;
+      occurs = i + 1;                         /* occurence is one based */
+      type = 5;  /* force all data to be null terminated character */
+      EXEC SQL SET DESCRIPTOR GLOBAL :outdesc VALUE :occurs 
+               TYPE = :type, LENGTH = :output_len;
+   
+      iptr = (short *)&outindi[i]; /* no mult-dimension non-char host vars */
+      EXEC SQL FOR :out_array_size
+               SET DESCRIPTOR GLOBAL :outdesc VALUE :occurs 
+               REF DATA = :output[i], REF INDICATOR = :iptr;
+   }   
+   
+   
+   
+   EXEC SQL WHENEVER NOT FOUND GOTO end_select_loop;
+   
+   /* print the column headings */
+   for (j=0; j < out_array_size; j++)
+      for (i=0; i < output_count; i++)
+         printf("%-*.*s ", 9,9, name[i]);
+   printf("\n");
+   
+   /* FETCH each row selected and print the column values. */
+   for (;;)
+   {
+      EXEC SQL FOR :out_array_size 
+              FETCH C INTO DESCRIPTOR GLOBAL :outdesc;
+      rows_this_fetch = sqlca.sqlerrd[2] - cumulative_rows;
+      cumulative_rows = sqlca.sqlerrd[2];
+      if (rows_this_fetch)
+      for (j=0; j < out_array_size && j < rows_this_fetch; j++)
+      {           /* output by columns using simplified formatting */
+         for (i=0; i < output_count; i++)
+           {                              
+                if (outindi[i][j] == -1)       
+                   printf("%-*.*s ", 9, 9, "NULL");
+               else
+                  printf("%-*.*s ", 9, 9, output[i][j]);  /* simplified */
+                              /* output formatting may cause truncation */
+                              /* but columns will line up */
+           } 
+      }
+       printf ("\n");
+   }
+
+end_select_loop:
+   /* print any unprinted rows */
+   rows_this_fetch = sqlca.sqlerrd[2] - cumulative_rows;
+   cumulative_rows = sqlca.sqlerrd[2];
+   if (rows_this_fetch)
+     for (j=0; j < out_array_size && j < rows_this_fetch; j++)
+       {           /* output by columns using simplified formatting */
+         for (i=0; i < output_count; i++)
+           {                              
+              if (outindi[i][j] == -1)       
+                   printf("%-*.*s ",9, 9, "NULL");
+               else
+                  printf("%-*.*s ", 9, 9, output[i][j]); 
+            } 
+        }
+   return(0);
+}
+
+void rows_processed()
+{  
+   int i;
+   for (i = 0; i < 8; i++)
+     {
+       if (strncmp(dyn_statement, dml_commands[i], 6) == 0)
+         {
+            printf("\n\n%d row%c processed.\n", sqlca.sqlerrd[2],
+                       sqlca.sqlerrd[2] == 1 ? ' ' : 's');
+            break;
+         }
+     }
+   return;
+}
+
+
+void help()
+{
+    puts("\n\nEnter a SQL statement or a PL/SQL block at the SQL> prompt.");
+    puts("Statements can be continued over several lines, except");
+    puts("within string literals.");
+    puts("Terminate a SQL statement with a semicolon.");
+    puts("Terminate a PL/SQL block (which can contain embedded semicolons)");
+    puts("with a slash (/).");
+    puts("Typing \"exit\" (no semicolon needed) exits the program.");
+    puts("You typed \"?\" or \"help\" to get this message.\n\n");
+}
+
+
+void sql_error()
+{
+    /* ORACLE error handler */
+    printf ("\n\n%.70s\n",sqlca.sqlerrm.sqlerrmc);
+    if (parse_flag)
+        printf
+        ("Parse error at character offset %d in SQL statement.\n",
+           sqlca.sqlerrd[4]);
+
+    EXEC SQL WHENEVER SQLERROR CONTINUE;
+    EXEC SQL ROLLBACK WORK;
+    longjmp(jmp_continue, 1);
+}
+
+
+int oracle_connect()
+{
+    EXEC SQL BEGIN DECLARE SECTION;
+        VARCHAR  username[128];
+        VARCHAR  password[32];
+    EXEC SQL END DECLARE SECTION;
+
+    printf("\nusername: ");
+    fgets((char *) username.arr, sizeof username.arr, stdin);
+    username.arr[strlen((char *) username.arr)-1] = '\0';
+    username.len = (unsigned short)strlen((char *) username.arr);
+
+    printf("password: ");
+    fgets((char *) password.arr, sizeof password.arr, stdin);
+    password.arr[strlen((char *) password.arr) - 1] = '\0';
+    password.len = (unsigned short)strlen((char *) password.arr);
+
+
+    EXEC SQL WHENEVER SQLERROR GOTO connect_error;
+
+    EXEC SQL CONNECT :username IDENTIFIED BY :password;
+
+    printf("\nConnected to ORACLE as user %s.\n", username.arr);
+
+    return 0;
+
+connect_error:
+    fprintf(stderr, "Cannot connect to ORACLE as user %s\n", username.arr);
+    return -1;
+}
+
+

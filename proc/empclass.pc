@@ -1,0 +1,58 @@
+
+#include <stdio.h>
+#include <stdlib.h>
+
+// This example uses a single (global) SQLCA that is shared by the
+// emp class implementation as well as the main program for this
+// application.
+#define SQLCA_STORAGE_CLASS extern
+#include <sqlca.h>
+
+// Include the emp class specification in the implementation of the
+// class body as well as the application program that makes use of it.
+EXEC SQL INCLUDE empclass.h;
+
+emp::emp()
+{
+  // The scope of this WHENEVER statement spans the entire module.
+  // Note that the error handler function is really a member function
+  // of the emp class.
+  EXEC SQL WHENEVER SQLERROR DO emp_error();
+  EXEC SQL ALLOCATE :emp_cursor;  // Constructor - ALLOCATE Cursor.
+}
+
+emp::~emp()
+{
+  EXEC SQL FREE :emp_cursor;      // Destructor - FREE Cursor.
+}
+
+void emp::open()
+{
+  EXEC SQL EXECUTE
+    BEGIN
+      emp_package.open_cursor(:emp_cursor);
+    END;
+  END-EXEC;
+}
+
+void emp::close()
+{
+  EXEC SQL CLOSE :emp_cursor;
+}
+
+void emp::fetch() throw (int)
+{
+  EXEC SQL FETCH :emp_cursor INTO :ename, :empno;
+  ename[10] = '\0';
+  if (sqlca.sqlcode == 1403)
+    throw sqlca.sqlcode;     // Like a WHENEVER NOT FOUND statement.
+}
+
+void emp::emp_error()
+{
+  printf("%.*s\n", sqlca.sqlerrm.sqlerrml, sqlca.sqlerrm.sqlerrmc);
+  EXEC SQL WHENEVER SQLERROR CONTINUE;
+  EXEC SQL ROLLBACK WORK RELEASE;
+  exit(1);
+}
+

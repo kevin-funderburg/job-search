@@ -1,0 +1,138 @@
+
+/*
+ *  sample6.pc: Dynamic SQL Method 1
+ *
+ *  This program uses dynamic SQL Method 1 to create a table,
+ *  insert a row, commit the insert, then drop the table.
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+/* Include the SQL Communications Area, a structure through
+ * which ORACLE makes runtime status information such as error
+ * codes, warning flags, and diagnostic text available to the
+ * program.
+ */
+#include <sqlca.h>
+
+/* Include the ORACLE Communications Area, a structure through
+ * which ORACLE makes additional runtime status information
+ * available to the program.
+ */
+#include <oraca.h>
+
+/* The ORACA=YES option must be specified to enable you
+ * to use the ORACA.
+ */
+
+EXEC ORACLE OPTION (ORACA=YES);
+
+/* Specifying the RELEASE_CURSOR=YES option instructs Pro*C
+ * to release resources associated with embedded SQL
+ * statements after they are executed.  This ensures that
+ * ORACLE does not keep parse locks on tables after data
+ * manipulation operations, so that subsequent data definition
+ * operations on those tables do not result in a parse-lock
+ * error.
+ */
+
+EXEC ORACLE OPTION (RELEASE_CURSOR=YES);
+
+void sql_error()
+{
+/* This is the Oracle error handler.
+ * Print diagnostic text containing the error message,
+ * current SQL statement, and location of error.
+ */
+    printf("\n%.*s\n",
+       sqlca.sqlerrm.sqlerrml, sqlca.sqlerrm.sqlerrmc);
+    printf("in \"%.*s...\"\n",
+        oraca.orastxt.orastxtl, oraca.orastxt.orastxtc);
+    printf("on line %d of %.*s.\n\n",
+        oraca.oraslnr, oraca.orasfnm.orasfnml,
+        oraca.orasfnm.orasfnmc);
+
+/* Disable Oracle error checking to avoid an infinite loop
+ * should another error occur within this routine as a 
+ * result of the rollback.
+ */
+    EXEC SQL WHENEVER SQLERROR CONTINUE;
+
+/* Roll back any pending changes and disconnect from Oracle. */
+    EXEC SQL ROLLBACK RELEASE;
+
+    exit(1);
+}
+
+typedef char asciz[80];
+EXEC SQL TYPE asciz IS STRING(80) REFERENCE;
+
+void main()
+{
+/* Declare the program host variables. */
+    char    *username = "SCOTT";
+    char    *password = "TIGER";
+    asciz    dynstmt1;
+    char     dynstmt2[10];
+    VARCHAR  dynstmt3[80];
+
+/* Call routine sql_error() if an ORACLE error occurs. */
+
+    EXEC SQL WHENEVER SQLERROR DO sql_error();
+
+/* Save text of current SQL statement in the ORACA if an
+ * error occurs.
+ */
+    oraca.orastxtf = ORASTFERR;
+
+/* Connect to Oracle. */
+
+    EXEC SQL CONNECT :username IDENTIFIED BY :password;
+    puts("\nConnected to ORACLE.\n");
+
+/* Execute a string literal to create the table.  This
+ * usage is actually not dynamic because the program does
+ * not determine the SQL statement at run time.
+ */
+    puts("CREATE TABLE dyn1 (col1 VARCHAR2(4))");
+
+    EXEC SQL EXECUTE IMMEDIATE
+         "CREATE TABLE dyn1 (col1 VARCHAR2(4))";
+
+/* Execute a string to insert a row.  The string must
+ * be null-terminated.  This usage is dynamic because the
+ * SQL statement is a string variable whose contents the
+ * program can determine at run time.
+ */
+    strcpy((char *)dynstmt1, "INSERT INTO DYN1 values ('TEST')");
+    puts(dynstmt1);
+
+    EXEC SQL EXECUTE IMMEDIATE :dynstmt1;
+
+/* Execute a SQL statement in a string to commit the insert.
+ * Pad the unused trailing portion of the array with spaces.
+ * Do NOT null-terminate it.
+ */
+    strcpy(dynstmt2, "COMMIT   ");
+    printf("%.10s\n", dynstmt2);
+
+    EXEC SQL EXECUTE IMMEDIATE :dynstmt2;
+
+/* Execute a VARCHAR to drop the table.  Set the .len field
+ * to the length of the .arr field.
+ */
+    strcpy((char *)dynstmt3.arr, "DROP TABLE DYN1");
+    dynstmt3.len = (unsigned short)strlen((char *)dynstmt3.arr);
+    puts((char *) dynstmt3.arr);
+
+    EXEC SQL EXECUTE IMMEDIATE :dynstmt3;
+
+/* Commit any outstanding changes and disconnect from Oracle. */
+    EXEC SQL COMMIT RELEASE;
+
+    puts("\nHave a good day!\n");
+    exit(0);
+}
+

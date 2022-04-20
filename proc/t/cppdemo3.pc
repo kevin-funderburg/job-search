@@ -1,0 +1,87 @@
+
+/*
+ * cppdemo3.pc : An example of C++ Inheritance
+ *
+ * This program finds all salesman and prints their names followed by how
+ * much they earn in total (ie; including any commissions).
+ */
+ 
+#include <iostream.h>
+#include <stdio.h>
+#include <sqlca.h>
+#include <string.h>
+#include <stdlib.h>
+
+#define NAMELEN 10
+
+class employee {                             // Base class is a simple employee
+public:
+  char ename[NAMELEN];
+  int sal;
+  employee(char *, int);
+};
+
+employee::employee(char *name, int salary)
+{
+  strcpy(this->ename, name);
+  this->sal = salary;
+}
+
+class salesman : public employee {          // A salesman is a kind of employee
+  int comm;
+public:
+  salesman(char *, int, int);
+  friend ostream& operator<<(ostream&, salesman&);
+};
+
+salesman::salesman(char *name, int salary, int commission)
+  : employee(name, salary), comm(commission) {} // Inherits employee attributes
+
+ostream& operator<<(ostream& s, salesman& m)
+{
+  return s << m.ename << (m.sal + m.comm) << endl;  
+}
+
+void print(char *ename, int sal, int comm)
+{
+  salesman man(ename, sal, comm);
+  cout << man;
+}
+
+void main()
+{
+  exec sql begin declare section;
+    char *uid = "scott/tiger";
+    char  name[NAMELEN];
+    int   salary, commission;
+    short comm_ind;
+  exec sql end declare section;
+
+  exec sql whenever sqlerror goto error;
+
+  exec sql connect :uid;
+  exec sql declare c cursor for
+    select ename, sal, comm from emp where job = 'SALESMAN'
+      order by ename;
+  exec sql open c;
+
+  cout << "Name    Salary" << endl << "------  ------" << endl;
+
+  exec sql whenever not found do break;
+  while(1)
+   {
+     exec sql fetch c into :name, :salary, :commission:comm_ind;
+     print(name, salary, (comm_ind < 0) ? 0 : commission);
+   }
+
+  exec sql close c;
+  exec sql rollback release;
+  exit(0);
+
+error:
+  cout << endl << sqlca.sqlerrm.sqlerrmc << endl;
+  exec sql rollback release;
+  exit(1);
+}
+
+

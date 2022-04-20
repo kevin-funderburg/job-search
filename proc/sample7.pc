@@ -1,0 +1,170 @@
+
+/*
+ *  sample7.pc: Dynamic SQL Method 2
+ *
+ *  This program uses dynamic SQL Method 2 to insert two rows into
+ *  the EMP table, then delete them.
+ */
+
+#include <stdio.h>
+#include <string.h>
+
+#include <stdlib.h>
+
+#define USERNAME "SCOTT"
+#define PASSWORD "TIGER"
+
+/* Include the SQL Communications Area, a structure through
+ * which ORACLE makes runtime status information such as error
+ * codes, warning flags, and diagnostic text available to the
+ * program.
+ */
+#include <sqlca.h>
+
+/* Include the ORACLE Communications Area, a structure through
+ * which ORACLE makes additional runtime status information
+ * available to the program.
+ */
+#include <oraca.h>
+
+/* The ORACA=YES option must be specified to enable use of
+ * the ORACA.
+ */
+EXEC ORACLE OPTION (ORACA=YES);
+
+char    *username = USERNAME;
+char    *password = PASSWORD;
+VARCHAR  dynstmt[80];
+int      empno   = 1234;
+int      deptno1 = 10;
+int      deptno2 = 20;
+
+
+/* Handle SQL runtime errors. */
+void sql_error(msg)
+    char *msg;
+{
+/* This is the ORACLE error handler.
+ * Print diagnostic text containing error message,
+ * current SQL statement, and location of error.
+ */
+    printf("\n%s", msg);
+    printf("\n%.*s\n",
+        sqlca.sqlerrm.sqlerrml, sqlca.sqlerrm.sqlerrmc);
+    printf("in \"%.*s...\"\n",
+        oraca.orastxt.orastxtl, oraca.orastxt.orastxtc);
+    printf("on line %d of %.*s.\n\n",
+        oraca.oraslnr, oraca.orasfnm.orasfnml,
+        oraca.orasfnm.orasfnmc);
+
+/* Disable ORACLE error checking to avoid an infinite loop
+ * should another error occur within this routine.
+ */
+    EXEC SQL WHENEVER SQLERROR CONTINUE;
+
+/* Roll back any pending changes and 
+ * disconnect from Oracle.
+ */
+    EXEC SQL ROLLBACK RELEASE;
+    exit(EXIT_FAILURE);
+}
+
+void main()
+{
+/* Call sql_error() whenever an error occurs
+ * processing an embedded SQL statement.
+ */
+    EXEC SQL WHENEVER SQLERROR DO sql_error("Oracle error");
+
+/* Save text of current SQL statement in the ORACA if an
+ * error occurs.
+ */
+    oraca.orastxtf = ORASTFERR;
+
+/* Connect to Oracle. */
+
+    EXEC SQL CONNECT :username IDENTIFIED BY :password;
+    puts("\nConnected to Oracle.\n");
+
+/* Assign a SQL statement to the VARCHAR dynstmt.  Both
+ * the array and the length parts must be set properly.
+ * Note that the statement contains two host-variable
+ * placeholders, v1 and v2, for which actual input
+ * host variables must be supplied at EXECUTE time.
+ */
+    strcpy((char *)dynstmt.arr,
+        "INSERT INTO EMP (EMPNO, DEPTNO) VALUES (:v1, :v2)");
+    dynstmt.len = (unsigned short)strlen((char *)dynstmt.arr);
+
+/* Display the SQL statement and its current input host
+ * variables.
+ */
+    puts((char *) dynstmt.arr);
+    printf("   v1 = %d,  v2 = %d\n", empno, deptno1);
+
+/* The PREPARE statement associates a statement name with
+ * a string containing a SQL statement.  The statement name
+ * is a SQL identifier, not a host variable, and therefore
+ * does not appear in the Declare Section.
+
+ * A single statement name can be PREPAREd more than once,
+ * optionally FROM a different string variable.
+ */
+    EXEC SQL PREPARE S FROM :dynstmt;
+
+/* The EXECUTE statement executes a PREPAREd SQL statement
+ * USING the specified input host variables, which are
+ * substituted positionally for placeholders in the
+ * PREPAREd statement.  For each occurrence of a
+ * placeholder in the statement there must be a variable
+ * in the USING clause.  That is, if a placeholder occurs
+ * multiple times in the statement, the corresponding
+ * variable must appear multiple times in the USING clause.
+ * The USING clause can be omitted only if the statement
+ * contains no placeholders.
+ *
+ * A single PREPAREd statement can be EXECUTEd more
+ * than once, optionally USING different input host
+ * variables.
+ */
+    EXEC SQL EXECUTE S USING :empno, :deptno1;
+
+/* Increment empno and display new input host variables. */
+
+    empno++;
+    printf("   v1 = %d,  v2 = %d\n", empno, deptno2);
+
+/* ReEXECUTE S to insert the new value of empno and a
+ * different input host variable, deptno2.
+ * A rePREPARE is unnecessary.
+ */
+    EXEC SQL EXECUTE S USING :empno, :deptno2;
+
+/* Assign a new value to dynstmt. */
+
+    strcpy((char *)dynstmt.arr,
+        "DELETE FROM EMP WHERE DEPTNO = :v1 OR DEPTNO = :v2");
+    dynstmt.len = (unsigned short)strlen((char *)dynstmt.arr);
+
+/* Display the new SQL statement and its current input host
+ * variables.
+ */
+    puts((char *) dynstmt.arr);
+    printf("   v1 = %d,    v2 = %d\n", deptno1, deptno2);
+
+/* RePREPARE S FROM the new dynstmt. */
+
+    EXEC SQL PREPARE S FROM :dynstmt;
+
+/* EXECUTE the new S to delete the two rows previously
+ * inserted.
+ */
+    EXEC SQL EXECUTE S USING :deptno1, :deptno2;
+
+/* Rollback any pending changes and disconnect from Oracle. */
+
+    EXEC SQL ROLLBACK WORK RELEASE;
+    puts((char *)"\nHave a good day!\n");
+    exit(EXIT_SUCCESS);
+}
+

@@ -1,0 +1,119 @@
+/*
+ * A very simple program that demonstrates how to do
+ * array fetches using dynamic SQL Method 4.
+ *
+ * Make sure to precompile with MODE=ORACLE.
+ */
+
+#include <stdio.h> 
+#include <sqlca.h> 
+#include <sqlda.h> 
+ 
+#include <sqlcpr.h>
+#include <stdlib.h>
+
+#define MAX_SELECT_ITEMS    8
+#define FETCH_SIZE          5  /* Fetch in 5-row chunks. */
+#define MAX_CHARS          10
+#define MAX_NAME_SIZE       8  /* Maximum size of a select-list item name. */
+ 
+SQLDA   *selda; 
+
+/* Data buffer. */
+char c_data[MAX_SELECT_ITEMS][FETCH_SIZE][MAX_CHARS];
+ 
+void print_rows(n)
+    int n;
+{
+    int row, sli;
+
+    for (row = 0; row < n; row++)
+    {
+        for (sli = 0; sli < selda->N; sli++)
+        {
+            printf("%.10s ", c_data[sli][row]);
+        }
+        printf("\n");
+    }
+}
+
+int array_size = FETCH_SIZE;  /* needs to be a host var for FOR */
+char *username = "scott/tiger"; 
+char *stmt = "select ename, empno, sal, hiredate from emp";
+
+/* This is a minimal program, with little error checking,
+ * since the SQL statement is hard-coded. If you were to
+ * substitute 'comm' for 'sal' in the statement below, the
+ * program would fail with a -1405 on Oracle7, as there are
+ * no indicator variables.
+ */
+
+void sql_error()
+{
+    char msgbuf[512];
+    size_t msgbuf_len, msg_len;
+
+    msgbuf_len = sizeof(msgbuf);
+    sqlglm(msgbuf, &msgbuf_len, &msg_len);
+
+    printf ("\n\n%.*s\n", msg_len, msgbuf);
+
+    EXEC SQL WHENEVER SQLERROR CONTINUE;
+    EXEC SQL ROLLBACK WORK RELEASE;
+    exit(EXIT_FAILURE);
+}
+
+void main() 
+{ 
+    int row_count;
+    int sli;     /* select-list item */
+
+    EXEC SQL CONNECT :username; 
+    if (sqlca.sqlcode == 0)
+        printf("Connected.\n"); 
+    else
+    {
+        printf("Cannot connect as SCOTT.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    EXEC SQL WHENEVER SQLERROR DO sql_error();
+
+    selda = sqlald(MAX_SELECT_ITEMS, MAX_NAME_SIZE, 0);
+
+    EXEC SQL PREPARE S FROM :stmt;
+    EXEC SQL DECLARE C CURSOR FOR S;
+    EXEC SQL OPEN C;
+    EXEC SQL DESCRIBE SELECT LIST FOR S INTO selda;
+
+    selda->N = selda->F;   /* Assumed not negative. */
+    for (sli = 0; sli < selda->N; sli++)
+    {
+        /* Set addresses of heads of the arrays in the V element. */
+        selda->V[sli] = c_data[sli][0];
+        /* Convert everything to varchar on output. */
+        selda->T[sli] = 1;
+        /* Set the maximum lengths. */
+        selda->L[sli] = MAX_CHARS;
+    }
+
+    for (row_count = 0; ;)
+    {
+        /* Do the fetch. The loop breaks on NOT FOUND. */
+        EXEC SQL FOR :array_size FETCH C USING DESCRIPTOR selda;
+
+        print_rows(sqlca.sqlerrd[2] - row_count);
+        row_count = sqlca.sqlerrd[2];
+        if (sqlca.sqlcode == 1403)
+            break;
+    }
+
+/*    if (sqlca.sqlerrd[2] - row_count > 0)
+        print_rows(sqlca.sqlerrd[2] - row_count); */
+
+    printf("\n%d rows retrieved\n", sqlca.sqlerrd[2]);
+
+    EXEC SQL ROLLBACK RELEASE;
+    exit(EXIT_SUCCESS);
+}
+

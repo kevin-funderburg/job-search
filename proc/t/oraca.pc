@@ -1,0 +1,88 @@
+
+/* oraca.pc
+ *
+ * This sample program demonstrates how to
+ * use the ORACA to determine various performance
+ * parameters at runtime.
+ */
+
+#include <stdio.h> 
+#include <stdlib.h>
+#include <string.h>
+#include <sqlca.h>
+#include <oraca.h> 
+
+EXEC SQL BEGIN DECLARE SECTION;
+  char *userid = "SCOTT/TIGER"; 
+  char  emp_name[21];
+  int   dept_number; 
+  float salary; 
+  char SQLSTATE[6];
+EXEC SQL END DECLARE SECTION;
+
+void sql_error(errmsg)
+    char *errmsg;
+{ 
+    char buf[6];
+
+    strcpy(buf, SQLSTATE);
+    EXEC SQL WHENEVER SQLERROR CONTINUE; 
+
+    EXEC SQL COMMIT WORK RELEASE; 
+    
+    if (strncmp(errmsg, "Oracle error", 12) == 0)
+        printf("\n%s, sqlstate is %s\n\n", errmsg, buf);
+    else
+        printf("\n%s\n\n", errmsg);
+
+    printf("Last SQL statement: %.*s\n", 
+    oraca.orastxt.orastxtl, oraca.orastxt.orastxtc); 
+    printf("\nAt or near line number %d\n", oraca.oraslnr); 
+    printf("\nCursor Cache Statistics\n------------------------\n"); 
+    printf("Maximum value of MAXOPENCURSORS:    %d\n", oraca.orahoc); 
+    printf("Maximum open cursors required:      %d\n", oraca.oramoc); 
+    printf("Current number of open cursors:     %d\n", oraca.oracoc); 
+    printf("Number of cache reassignments:      %d\n", oraca.oranor); 
+    printf("Number of SQL statement parses:     %d\n", oraca.oranpr); 
+    printf("Number of SQL statement executions: %d\n", oraca.oranex); 
+    exit(1); 
+} 
+
+void main() 
+{ 
+    char temp_buf[32];
+
+    EXEC SQL WHENEVER SQLERROR DO sql_error("Oracle error");
+    EXEC SQL CONNECT :userid; 
+    
+    EXEC ORACLE OPTION (ORACA=YES);
+
+    oraca.oradbgf  = 1;                    /* enable debug operations */ 
+    oraca.oracchf  = 1;             /* gather cursor cache statistics */ 
+    oraca.orastxtf = 3;              /* always save the SQL statement */ 
+
+    printf("Enter department number: "); 
+    gets(temp_buf);
+    dept_number = atoi(temp_buf);
+
+    
+    EXEC SQL DECLARE emp_cursor CURSOR FOR 
+      SELECT ename, sal + NVL(comm,0) AS sal_comm
+        FROM emp 
+        WHERE deptno = :dept_number
+        ORDER BY sal_comm DESC;
+    
+    EXEC SQL OPEN emp_cursor; 
+    EXEC SQL WHENEVER NOT FOUND DO sql_error("End of data");
+    
+    for (;;) 
+    { 
+        EXEC SQL FETCH emp_cursor INTO :emp_name, :salary; 
+        printf("%.10s\n", emp_name);
+        if (salary < 2500) 
+            EXEC SQL INSERT INTO pay1 VALUES (:emp_name, :salary); 
+        else 
+            EXEC SQL INSERT INTO pay2 VALUES (:emp_name, :salary); 
+    } 
+} 
+

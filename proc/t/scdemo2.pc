@@ -1,0 +1,120 @@
+/*
+ *  A Sample program to demonstrate the use of scrollable 
+ *  cursors with host arrays.
+ * 
+ *  This program uses the scott/tiger schema.Make sure
+ *  that this schema exists before executing this program
+ */
+
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <sqlca.h>
+
+#define ARRAY_LENGTH   4
+
+/* user and passwd */
+char *username = "scott";
+char *password = "tiger";
+
+/* Declare a host structure tag. */
+struct emp_rec_array
+{
+    int    emp_number;
+    char   emp_name[20];
+    float  salary;
+} emp_rec[ARRAY_LENGTH];
+
+void print_rows()
+{
+    int i;
+
+    for(i=0; i<ARRAY_LENGTH; i++)
+        printf("%d    %s  %8.2f\n", emp_rec[i].emp_number,
+             emp_rec[i].emp_name, emp_rec[i].salary);
+
+}
+
+void sql_error(char *msg)
+{
+    EXEC SQL WHENEVER SQLERROR CONTINUE;
+
+    printf("\n%s", msg);
+    printf("\n% .70s \n", sqlca.sqlerrm.sqlerrmc);
+
+    EXEC SQL ROLLBACK WORK RELEASE;
+    exit(EXIT_FAILURE);
+}
+
+void main()
+{
+    int noOfRows; /* Number of rows in the result set */
+
+    /* Error handle */
+    EXEC SQL WHENEVER SQLERROR DO sql_error("Connect error:");
+
+    /* Connect to the data base */
+    EXEC SQL CONNECT :username IDENTIFIED BY :password;
+
+    /* Error handle */
+    EXEC SQL WHENEVER SQLERROR DO sql_error("Oracle error:");
+
+    /* declare the cursor in scrollable mode */
+    EXEC SQL DECLARE c1 SCROLL CURSOR FOR
+        SELECT empno, ename, sal FROM emp;
+
+    EXEC SQL OPEN c1;
+
+    EXEC SQL WHENEVER SQLERROR DO sql_error("Fetch Error:");
+
+    /* This is a dummy fetch to find out the number of rows
+       in the result set */
+    EXEC SQL FETCH LAST c1 INTO :emp_rec;
+
+    /* The number of rows in the result set is given by 
+       the value of sqlca.sqlerrd[2] */
+
+    noOfRows = sqlca. sqlerrd[2];
+    printf("Total number of rows in the result set %d:\n", 
+             noOfRows);
+
+    /* Fetch the first ARRAY_LENGTH number of rows */
+    EXEC SQL FETCH FIRST c1 INTO :emp_rec;
+    printf("******************** DEFAULT : \n");
+    print_rows();
+
+    /* Fetch the next set of ARRAY_LENGTH rows */
+    EXEC SQL FETCH NEXT c1 INTO :emp_rec;
+    printf("******************** NEXT  : \n");
+    print_rows();
+
+    /* Fetch a set of ARRAY_LENGTH rows from the 3rd row onwards */
+    EXEC SQL FETCH ABSOLUTE 3 c1 INTO :emp_rec;
+    printf("******************** ABSOLUTE 3 : \n");
+    print_rows();
+
+    /* Fetch the current ARRAY_LENGTH set of rows */
+    EXEC SQL FETCH CURRENT c1 INTO :emp_rec;
+    printf("******************** CURRENT : \n");
+    print_rows();
+
+    /* Fetch a set of ARRAY_LENGTH rows from the 2nd offset
+       from the current cursor position */
+    EXEC SQL FETCH RELATIVE 2 c1 INTO :emp_rec;
+    printf("******************** RELATIVE 2 : \n");
+    print_rows();
+
+    /* Again Fetch the first ARRAY_LENGTH number of rows */
+    EXEC SQL FETCH ABSOLUTE 0 c1 INTO :emp_rec;
+    printf("******************** ABSOLUTE 0 : \n");
+    print_rows();
+
+    /* close the cursor */
+    EXEC SQL CLOSE c1;
+
+/* Disconnect from the database. */
+    EXEC SQL COMMIT WORK RELEASE;
+    exit(EXIT_SUCCESS);
+}
+

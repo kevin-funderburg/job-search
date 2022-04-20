@@ -1,0 +1,610 @@
+/***************************************************************************
+  
+  SCENARIO: 
+  
+  We consider the example of a database used to store driver's
+  licenses. The licenses are stored as rows of a table containing
+  three columns: the sss number of a person, his name in text and the 
+  text summary of the info found in his license.
+
+  The sss number is the driver's unique social security number.
+
+  The name is the driver's given name as found on his ID card.
+
+  The text summary is a summary of the information on the driver,
+  including his driving record, which can be arbitrarily long and may
+  contain comments and data regarding the person's driving ability. 
+
+  APPLICATION OVERVIEW:
+
+  This example demonstrate how a Pro*C client can handle the new LOB
+  datatypes through PL/SQL routines. Demonstrated are mechanisms for
+  accessing and storing lobs to tables and manipulating LOBs through
+  the stored procedures available via the dbms_lob package.
+
+****************************************************************************/
+
+/***************************************************************************
+
+   To run the demo:
+
+   1. Execute the script, lobdemo1c.sql in SQL*Plus
+   2. Precompile using Pro*C/C++
+        proc lobdemo1 user=scott/tiger sqlcheck=full
+   3. Compile/Link (This step is platform specific)
+
+****************************************************************************/
+
+/*** The following will be added to the creation script for this example ***
+ *** This code can be found in lobdemo1c.sql                             ***
+
+connect scott/tiger;
+
+set serveroutput on;
+
+Rem Make sure database has no license_table floating around
+
+drop table license_table;
+
+Rem ABSTRACTION:
+Rem A license table reduces the notion of a driver's license into three 
+Rem distinct components - a unique social security number (sss), 
+Rem a name (name), and a text summary of miscellaneous information.
+
+Rem IMPLEMENTATION:
+Rem Our implementation follows this abstraction
+
+create table license_table(
+  sss char(9),
+  name varchar2(50),
+  txt_summary clob);
+
+insert into license_table 
+        values('971517006', 'Dennis Kernighan', 
+        'Wearing a Bright Orange Shirt - 31 Oct 1996');
+
+insert into license_table 
+        values('555001212', 'Eight H. Number', 
+        'Driving Under the Influence - 1 Jan 1997');
+
+insert into license_table 
+        values('010101010', 'P. Doughboy', 
+        'Impersonating An Oracle Employee - 10 Jan 1997');
+
+insert into license_table
+        values('555377012', 'Calvin N. Hobbes', 
+        'Driving Under the Influence - 30 Nov 1996');
+
+select count(*) from license_table;
+
+Rem Commit to save
+commit;
+
+****************************************************************************/
+
+/**************************
+ * Begin lobdemo1.pc code *
+ **************************/
+
+#define EX_SUCCESS       0
+#define EX_FAILURE       1
+
+#ifndef STDIO
+# include <stdio.h>
+#endif /* STDIO */
+
+#ifndef SQLCA_ORACLE
+# include <sqlca.h>
+#endif /* SQLCA_ORACLE */
+
+#ifndef OCI_ORACLE
+# include <oci.h>
+#endif /* OCI_ORACLE */
+
+#include <time.h>
+#include <string.h>
+#include <stdlib.h>
+#include <ctype.h>
+
+#ifndef LOBDEMO1_ORACLE
+# include "lobdemo1.h"
+#endif /* LOBDEMO1_ORACLE */
+
+/***********
+ * Defines *
+ ***********/
+#define SSS_LENGTH 12
+#define NAME_LENGTH 50 /* corresponds with max length of name in table */
+#define BUFLEN 1024
+#define MAXCRIME 5
+#define DATELENGTH 15
+
+/***********
+ * Globals *
+ ***********/
+
+char *CrimeList[MAXCRIME]={ "Driving Under the Influence", 
+                            "Grand Theft Auto", 
+                            "Driving Without a License",
+                            "Impersonating an Oracle Employee",
+                            "Wearing a Bright Orange Shirt" };
+
+char curdate[DATELENGTH+1];
+
+/*********************** 
+ * Function prototypes *
+ ***********************/
+
+#if defined(__STDC__)
+  void GetDate( void );
+  void PrintSQLError( void );
+  void Driver( void );
+  void ListRecords( void );
+  void PrintCrime( OCIClobLocator *a_clob );
+  void GetRecord( void );
+  void NewRecord( void );
+  char *NewCrime( void );
+  void GetName( char *name_holder );
+  void AppendToClob( OCIClobLocator *a_clob, char *charbuf );
+  void AddCrime( void );
+  void ReadClob( OCIClobLocator *a_clob );
+  boolean GetSSS( char *suggested_sss );
+#else
+  void GetDate();
+  void PrintSQLError( );
+  void Driver( );
+  void ListRecords( );
+  void PrintCrime(/* OCIClobLocator *a_clob */);
+  void GetRecord( );
+  void NewRecord( );
+  char *NewCrime( );
+  void GetName(/* char *name_holder */);
+  void AppendToClob(/* OCIClobLocator *a_clob, char *charbuf */);
+  void AddCrime();
+  boolean GetSSS(/* char *suggested_sss */);
+#endif
+
+/* 
+ * NAME
+ *   GetDate
+ * DESCRIPTION
+ *   Get date from user
+ * LOB FEATURES
+ *   none
+ */ 
+
+void GetDate()
+{
+  time_t now;
+
+  now = time(NULL);
+  strftime(curdate, DATELENGTH, " - %d %b %Y", localtime(&now));
+}
+
+main()
+{
+  char * uid = "scott/tiger";
+
+  EXEC SQL WHENEVER SQLERROR DO PrintSQLError();
+
+  printf("Connecting to license database account: %s \n", uid);
+  EXEC SQL CONNECT :uid;
+  
+  GetDate();
+
+  printf("\t*******************************\n");
+  printf("\t* Welcome to the DMV Database *\n");
+  printf("\t*******************************\n\n");
+  printf("Today's Date is%s\n", curdate);
+
+  Driver();
+
+  EXEC SQL COMMIT RELEASE;
+
+  return (EX_SUCCESS);
+}
+
+/* 
+ * NAME
+ *   Driver
+ * DESCRIPTION
+ *   Command Dispatch Routine
+ * LOB FEATURES
+ *   none
+ */ 
+
+void Driver()
+{
+  char choice[20];
+  boolean done = FALSE;
+
+  while (!done)
+  {
+    printf("\nLicense Options:\n");
+    printf("\t(L)ist available records by SSS number\n");
+    printf("\t(G)et information on a particular record\n");
+    printf("\t(A)dd crime to a record\n");
+    printf("\t(I)nsert new record to database\n");
+    printf("\t(Q)uit\n");
+    printf("Enter your choice: ");
+
+    fgets(choice, 20, stdin);
+    switch(toupper(choice[0]))
+    {
+    case 'L':
+      ListRecords();
+      break;
+    case 'G':
+      GetRecord();
+      break;
+    case 'A':
+      AddCrime();
+      break;
+    case 'I': 
+      NewRecord();
+      break;
+    case 'Q':
+      done = TRUE;
+      break;
+    default:
+      break;
+    }
+  }
+}
+
+/* 
+ * NAME
+ *   ListRecords
+ * DESCRIPTION
+ *   List available records by sss number
+ * LOB FEATURES
+ *   none
+ */ 
+
+void ListRecords()
+{
+  char *select_sss = "SELECT SSS FROM LICENSE_TABLE";
+  char sss[10];
+
+  EXEC SQL PREPARE sss_exec FROM :select_sss;
+  EXEC SQL DECLARE sss_cursor CURSOR FOR sss_exec;
+  EXEC SQL OPEN sss_cursor;
+
+  printf("Available records:\n");
+
+  EXEC SQL WHENEVER NOT FOUND DO break;
+  while (TRUE)
+    {
+      EXEC SQL FETCH sss_cursor INTO :sss;
+      printf("\t%s\n", sss);
+    }
+  EXEC SQL WHENEVER NOT FOUND CONTINUE;
+
+  EXEC SQL CLOSE sss_cursor;
+}
+
+
+/* 
+ * NAME
+ *   PrintCrime
+ * DESCRIPTION
+ *   Tests correctness of clob
+ * LOB FEATURES
+ *   OCIlobRead and OCILobGetLength
+ */
+
+void PrintCrime(a_clob)
+  OCIClobLocator *a_clob; 
+{ 
+  ub4 lenp; 
+
+  printf("\n");
+  printf("=====================\n");
+  printf(" CRIME SHEET SUMMARY \n");
+  printf("=====================\n\n");
+
+  EXEC SQL LOB DESCRIBE :a_clob GET LENGTH INTO :lenp;
+
+  if(lenp == 0) /* No crime on file */
+    {
+      printf("Record is clean\n");
+    }
+  else
+    {
+      ub4 amt = lenp;
+      varchar *the_string = (varchar *)malloc(2 + lenp);
+
+      the_string->len = (ub2)lenp;      
+
+      EXEC SQL WHENEVER NOT FOUND CONTINUE;
+      EXEC SQL LOB READ :amt
+        FROM :a_clob INTO :the_string WITH LENGTH :lenp;
+         
+      printf("%.*s\n", the_string->len, the_string->arr);
+      free(the_string);
+    }
+}
+
+/* 
+ * NAME
+ *   GetRecord
+ * DESCRIPTION
+ *   Get license of single individual
+ * LOB FEATURES
+ *   allocate and select of blob and clob
+ */ 
+
+void GetRecord()
+{
+  char sss[SSS_LENGTH];
+  
+  if(GetSSS(sss) == TRUE)
+    {
+      OCIClobLocator *license_txt;
+      char name[NAME_LENGTH]={'\0'};
+      
+      EXEC SQL ALLOCATE :license_txt;
+
+      EXEC SQL SELECT name, txt_summary INTO :name, :license_txt 
+        FROM license_table WHERE sss = :sss;
+      
+      printf("========================================================\n\n");
+      printf("NAME: %s\tSSS: %s\n", name, sss);
+      PrintCrime(license_txt);
+      printf("\n\n========================================================\n");
+
+      EXEC SQL FREE :license_txt;
+    }
+  else
+    {
+      printf("SSS Number Not Found\n");
+    }
+}
+
+/* 
+ * NAME
+ *   NewRecord
+ * DESCRIPTION
+ *   Create new record in database
+ * LOB FEATURES
+ *   EMPTY_CLOB() and OCILobWrite
+ */ 
+
+void NewRecord()
+{
+  char sss[SSS_LENGTH], name[NAME_LENGTH] = {'\0'};
+  
+  if(GetSSS(sss) == TRUE)
+    {
+      printf("Record with that sss number already exists.\n");
+      return;
+    }
+  else
+    {
+      OCIClobLocator *license_txt;
+      
+      EXEC SQL ALLOCATE :license_txt;
+      
+      GetName(name);
+
+      EXEC SQL INSERT INTO license_table 
+        VALUES (:sss, :name, empty_clob());
+
+      EXEC SQL SELECT TXT_SUMMARY INTO :license_txt FROM LICENSE_TABLE
+        WHERE SSS = :sss;
+
+      printf("========================================================\n\n");
+      printf("NAME: %s\tSSS: %s\n", name, sss);
+      PrintCrime(license_txt);
+      printf("\n\n========================================================\n");
+
+      EXEC SQL FREE :license_txt;
+    }
+}
+
+/* 
+ * NAME
+ *   NewCrime
+ * DESCRIPTION
+ *   Query user for new crime
+ * LOB FEATURES
+ *   None
+ */ 
+
+char *NewCrime()
+{
+  int  SuggestedCrimeNo;
+  int  i;
+  char crime[10];
+
+  printf("Select from the following:\n");
+  for(i = 1; i <= MAXCRIME; i++)
+    printf("(%d) %s\n", i, CrimeList[i-1]);
+
+  printf("Crime (1-5): ");
+  fgets(crime, 10, stdin);
+  SuggestedCrimeNo = atoi(crime);
+
+  while((SuggestedCrimeNo < 1) || (SuggestedCrimeNo > MAXCRIME))
+    {
+      printf("Invalid selection\n");
+      printf("Crime (1-5): ");
+      fgets(crime, 10, stdin);
+      SuggestedCrimeNo = atoi(crime);
+    }
+  
+  return CrimeList[SuggestedCrimeNo-1];
+}
+
+/* 
+ * NAME
+ *   AppendToClob
+ * DESCRIPTION
+ *   Append String charbuf to a Clob in the following way:
+ *   if the contents of the clob a_clob were <foo> and the
+ *   contents of charbuf were <bar>, after the append a_clob
+ *   will contain: <foo>\n<bar> - <curdate>
+ *   where <curdate> is today's date as obtained by the
+ *   GetDate procedure.
+ * LOB FEATURES
+ *   OCILobWrite
+ * NOTE
+ *   Potentially, charbuf can be a very large string buffer.
+ *   Furthermore, it should be noted that lobs and lob
+ *   performance were designed for large data. Therefore, 
+ *   users are encouraged to read and write large chunks of
+ *   data to lobs. 
+ */ 
+
+void AppendToClob(a_clob, charbuf)
+  OCIClobLocator *a_clob;
+  char *charbuf;
+{
+  ub4 ClobLen, WriteAmt, Offset;
+  int CharLen = strlen(charbuf);
+  int NewCharbufLen = CharLen + DATELENGTH + 4; 
+  varchar *NewCharbuf;
+ 
+  NewCharbuf = (varchar *)malloc(2 + NewCharbufLen);
+
+  NewCharbuf->arr[0] = '\n';
+  NewCharbuf->arr[1] = '\0';
+  strcat((char *)NewCharbuf->arr, charbuf);
+  NewCharbuf->arr[CharLen + 1] = '\0';
+  strcat((char *)NewCharbuf->arr, curdate);
+
+  NewCharbuf->len = NewCharbufLen;
+
+  EXEC SQL LOB DESCRIBE :a_clob GET LENGTH INTO :ClobLen;
+
+  WriteAmt = NewCharbufLen;
+  Offset = ClobLen + 1;
+
+  EXEC SQL LOB WRITE ONE :WriteAmt FROM :NewCharbuf
+    WITH LENGTH :NewCharbufLen INTO :a_clob AT :Offset;
+
+  free(NewCharbuf);
+}
+
+/* 
+ * NAME
+ *   AddCrime
+ * DESCRIPTION
+ *   Add a crime to a citizen's crime file
+ * LOB FEATURES
+ *   OCILobWrite
+ */ 
+
+void AddCrime()
+{
+  char sss[SSS_LENGTH];
+
+  if (GetSSS(sss) == TRUE)
+    {
+      OCIClobLocator *license_txt;
+      char *crimebuf;
+      char  name[NAME_LENGTH] = {'\0'};
+      
+      EXEC SQL ALLOCATE :license_txt;   
+      
+      EXEC SQL SELECT txt_summary INTO :license_txt FROM license_table
+        WHERE sss = :sss FOR UPDATE; 
+
+      crimebuf = NewCrime();
+
+      printf("Added %s to CrimeList\n", crimebuf);
+      AppendToClob(license_txt, crimebuf);
+
+      EXEC SQL SELECT name INTO :name FROM license_table WHERE sss = :sss;
+
+      printf("NAME: %s SSS: %s\n", name, sss);
+      PrintCrime(license_txt);
+
+      EXEC SQL COMMIT;
+      EXEC SQL FREE :license_txt;
+    }
+  else
+    {
+      printf("SSS Number Not Found\n");
+    }
+}
+
+/* 
+ * NAME
+ *   GetSSS
+ * DESCRIPTION
+ *   Fills the passed buffer with a client-supplied social security number
+ *   Returns FALSE if sss does not correspond to any entry in the database,
+ *   else returns TRUE
+ * LOB FEATURES
+ *   none
+ */
+
+boolean GetSSS(suggested_sss)
+  char *suggested_sss;
+{
+  int count = 0;
+  int i;
+
+  printf("Social Security Number: ");
+  fgets(suggested_sss, SSS_LENGTH, stdin);
+
+  for(i = 0; ((suggested_sss[i] != '\0') && (i < SSS_LENGTH)); i++)
+    {
+      if(suggested_sss[i] == '\n') 
+        suggested_sss[i]='\0';
+    }
+
+  EXEC SQL SELECT COUNT(*) INTO :count FROM license_table 
+    WHERE sss = :suggested_sss;
+
+  return (count != 0);
+}
+
+/* 
+ * NAME
+ *   GetName
+ * DESCRIPTION
+ *   Get name from user. 
+ *   
+ * LOB FEATURES
+ *   none
+ */
+
+void GetName(name_holder)
+  char *name_holder;
+{
+  int count=0;
+  int i;
+
+  printf("Enter Name: ");
+  fgets(name_holder, NAME_LENGTH + 1, stdin);
+
+  for(i = 0; name_holder[i] != '\0'; i++)
+    {
+      if(name_holder[i] == '\n') 
+        name_holder[i]='\0';
+    }
+
+  return;
+}
+
+/* 
+ * NAME
+ *   PrintSQLError
+ * DESCRIPTION
+ *   Prints an error message using info in sqlca and calls exit.
+ * COLLECTION FEATURES
+ *   none
+ */ 
+
+void PrintSQLError()
+{
+  EXEC SQL WHENEVER SQLERROR CONTINUE;
+  printf("SQL error occurred...\n");
+  printf("%.*s\n", (int)sqlca.sqlerrm.sqlerrml,
+         (CONST char *)sqlca.sqlerrm.sqlerrmc);
+  EXEC SQL ROLLBACK RELEASE;
+  exit(EX_FAILURE);
+}
+

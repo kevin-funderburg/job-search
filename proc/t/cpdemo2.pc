@@ -1,0 +1,185 @@
+ /*
+  * Program to show the performance increment when cpool option is used
+  * Run this program with cpool=no. Record the time taken for the program to
+  * execute
+  *
+  * Compare the the execution time
+  *
+  * This program also demonstrates the impact of properly tuned CMAX 
+  * parameter on the performance
+  *
+  * Run the program with the following parameter values for best performance
+  * 
+  * CMIN=5
+  * CINCR=2
+  * CMAX=14
+  *
+  */
+
+
+#include <stdio.h>
+#include <sqlca.h>
+
+#ifdef DCE_THREADS 
+#include <pthread.h> 
+#else 
+#include <sys/time.h>
+#include <pthread.h>
+typedef void*       pthread_addr_t;
+typedef void*      (*pthread_startroutine_t) (void*);
+#define pthread_attr_default  (const pthread_attr_t *)NULL
+#endif 
+
+
+#define CONNINFO "hr/hr"
+#define THREADS 40
+
+/***** prototypes ************** */
+void selectFunction();
+void updateFunction();
+
+void err_report(struct sqlca sqlca);
+/* ************************* */
+
+/***** parameter to the function selectFunction, updateFunction */
+struct parameters 
+{
+  sql_context ctx;
+  char connName[20];
+  char dbName[20];
+  int thread_id;
+};
+typedef struct parameters parameters;
+/*******************************************/
+
+parameters params[THREADS];
+
+struct timeval tp1;
+struct timeval tp2;
+
+int main()
+{
+  int i;
+
+  pthread_t thread_id[THREADS];
+  pthread_addr_t status;
+
+  int thrNos[THREADS];
+
+  for(i=0; i<THREADS; i++)
+    thrNos[i] = i;
+
+  EXEC SQL ENABLE THREADS;
+
+  /* Time before executing the program */
+  if(gettimeofday(&tp1, (void*)NULL) == -1){
+    perror("First: ");
+    exit(0);
+  }
+
+  EXEC SQL WHENEVER SQLERROR DO err_report(sqlca);
+  /* connect THREADS times to the data base */
+  for(i=0; i<THREADS; i++)
+  {
+    strcpy(params[i].dbName, "inst1");
+    sprintf(params[i].connName,"conn%d", i);
+    params[i].thread_id = i;
+
+    /* logon to the data base */
+    EXEC SQL CONTEXT ALLOCATE :params[i].ctx;
+    EXEC SQL CONTEXT USE :params[i].ctx;
+    EXEC SQL CONNECT :CONNINFO
+      AT :params[i].connName USING :params[i].dbName;
+  }
+
+
+  /* create THREADS number of threads */
+  for(i=0;i<THREADS;i++)
+  {
+      printf("Creating thread %d \n", i);
+      if(i%2)
+      {
+        /* do a select operation if the thread id is odd */
+        if(pthread_create(&thread_id[i],pthread_attr_default, 
+            (pthread_startroutine_t)selectFunction, 
+            (pthread_addr_t) &params[i])) 
+          printf("Cant create thread %d \n", i);
+      }
+      else
+      {
+        /* othewise do an update operation */
+        if(pthread_create(&thread_id[i],pthread_attr_default, 
+            (pthread_startroutine_t)updateFunction, 
+            (pthread_addr_t) &params[i])) 
+          printf("Cant create thread %d \n", i);
+      }
+
+  }
+
+  for(i=0; i<THREADS; i++)
+  {
+    if(pthread_join(thread_id[i],&status)) 
+      printf("Error when waiting for thread % to terminate\n", i); 
+
+    if(pthread_detach(thread_id[i])) 
+      printf("Error detaching thread! \n"); 
+  }
+
+  if(gettimeofday(&tp2, (void*)NULL) == -1){
+  perror("Second: ");
+        exit(0);
+  }
+
+  printf(" \n\nTHE TOTAL TIME TAKEN FOR THE PROGRAM EXECUTION = %f \n\n",
+      (float)(tp2.tv_sec - tp1.tv_sec) + ((float)(tp2.tv_usec -
+      tp1.tv_usec)/1000000.0));
+
+  /* free the context */
+  for(i=0; i<THREADS; i++)
+  {
+    EXEC SQL CONTEXT USE :params[i].ctx;
+    EXEC SQL AT :params[i].connName COMMIT WORK RELEASE;
+
+    EXEC SQL CONTEXT FREE :params[i].ctx;
+  }
+
+  return 0;
+}
+
+void selectFunction(parameters *params)
+{
+  char empName[110][21];
+  printf("Thread %d selecting .... \n", params->thread_id);
+
+  EXEC SQL CONTEXT USE :params->ctx;
+  EXEC SQL AT : params->connName
+    SELECT FIRST_NAME into empName from EMPLOYEES;
+  printf("Thread %d selected ....\n", params->thread_id);
+  return;
+}
+
+void updateFunction(parameters *params)
+{
+  printf(" Thread %d Updating ... \n", params->thread_id);
+
+  EXEC SQL CONTEXT USE :params->ctx;
+  EXEC SQL AT :params->connName update EMPLOYEES
+    set SALARY = 4000 where DEPARTMENT_ID = 10;
+
+  /* commit the changes */
+  EXEC SQL AT :params->connName COMMIT;
+
+  printf(" Thread %d Updated ... \n", params->thread_id);
+  return;
+}
+
+
+/*********** Oracle error ***********/
+void err_report(struct sqlca sqlca)
+{
+  if (sqlca.sqlcode < 0)
+   printf("\n%.*s\n\n",sqlca.sqlerrm.sqlerrml,sqlca.sqlerrm.sqlerrmc);
+
+  exit(0);
+}
+

@@ -1,0 +1,569 @@
+/***************************************************************
+sample4.pc
+This program demonstrates the use of type equivalencing using the
+LONG VARRAW external datatype. In order to provide a useful example
+that is portable across different systems, the program inserts
+binary files into and retrieves them from the database.  For
+example, suppose you have a file called 'hello' in the current
+directory.  You can create this file by compiling the following
+source code:
+
+#include <stdio.h>
+
+int main()
+{
+  printf("Hello World!\n");
+}
+
+When this program is run, we get:
+
+$hello
+Hello World!
+
+Here is some sample output from a run of sample4:
+
+$sample4
+Connected.
+Do you want to create (or recreate) the EXECUTABLES table (y/n)? y
+EXECUTABLES table successfully dropped.  Now creating new table...
+EXECUTABLES table created.
+
+Sample 4 Menu.  Would you like to:
+(I)nsert a new executable into the database
+(R)etrieve an executable from the database
+(L)ist the executables stored in the database
+(D)elete an executable from the database
+(Q)uit the program
+
+Enter i, r, l, or q: l
+
+Executables           Length (bytes)
+--------------------  --------------
+
+Total Executables: 0
+
+Sample 4 Menu.  Would you like to:
+(I)nsert a new executable into the database
+(R)etrieve an executable from the database
+(L)ist the executables stored in the database
+(D)elete an executable from the database
+(Q)uit the program
+
+Enter i, r, l, or q: i
+Enter the key under which you will insert this executable: hello
+Enter the filename to insert under key 'hello'.
+If the file is not in the current directory, enter the full
+path: hello
+Inserting file 'hello' under key 'hello'...
+Inserted.
+
+Sample 4 Menu.  Would you like to:
+(I)nsert a new executable into the database
+(R)etrieve an executable from the database
+(L)ist the executables stored in the database
+(D)elete an executable from the database
+(Q)uit the program
+
+Enter i, r, l, or q: l
+
+Executables           Length (bytes)
+--------------------  --------------
+hello                           5508
+
+Total Executables: 1
+
+Sample 4 Menu.  Would you like to:
+(I)nsert a new executable into the database
+(R)etrieve an executable from the database
+(L)ist the executables stored in the database
+(D)elete an executable from the database
+(Q)uit the program
+
+Enter i, r, l, or q: r
+Enter the key for the executable you wish to retrieve: hello
+Enter the file to write the executable stored under key hello into.  If you
+don't want the file in the current directory, enter the
+full path: h1
+Retrieving executable stored under key 'hello' to file 'h1'...
+Retrieved.
+
+Sample 4 Menu.  Would you like to:
+(I)nsert a new executable into the database
+(R)etrieve an executable from the database
+(L)ist the executables stored in the database
+(D)elete an executable from the database
+(Q)uit the program
+
+Enter i, r, l, or q: q
+
+We now have the binary file 'h1' created, and we can run it:
+
+$h1
+Hello World!
+***************************************************************/
+
+#include <oci.h>
+#include <string.h>
+#include <stdio.h>
+#include <sqlca.h>
+#include <stdlib.h>
+#include <sqlcpr.h>
+
+/* Oracle error code for 'table or view does not exist'. */
+#define NON_EXISTENT  -942
+#define NOT_FOUND     1403
+
+/* This is the definition of the long varraw structure.
+ * Note that the first field, len, is a long instead
+ * of a short.  This is becuase the first 4
+ * bytes contain the length, not the first 2 bytes.
+ */
+typedef struct long_varraw {
+  ub4  len;
+  text buf[1];
+} long_varraw;
+
+
+/* Type Equivalence long_varraw to LONG VARRAW.
+ * All variables of type long_varraw from this point
+ * on in the file will have external type 95 (LONG VARRAW)
+ * associated with them.
+ */
+EXEC SQL TYPE long_varraw IS LONG VARRAW REFERENCE;
+
+
+/* This program's functions declared. */
+#if defined(__STDC__)
+  void do_connect(void);
+  void create_table(void);
+  void sql_error(char *);
+  void list_executables(void);
+  void print_menu(void);
+  void do_insert(varchar *, char *);
+  void do_retrieve(varchar *, char *);
+  void do_delete(varchar *);
+  ub4  read_file(char *, OCIBlobLocator *);
+  void write_file(char *, OCIBlobLocator *);
+#else
+  void do_connect(/*_ void _*/);
+  void create_table(/*_ void _*/);
+  void sql_error(/*_ char * _*/);
+  void list_executables(/*_ void _*/);
+  void print_menu(/*_ void _*/);
+  void do_insert(/*_ varchar *, char * _*/);
+  void do_retrieve(/*_ varchar *, char * _*/);
+  void do_delete(/*_ varchar * _*/);
+  ub4  read_file(/*_ char *, OCIBlobLocator * _*/);
+  void write_file(/*_ char *, OCIBlobLocator * _*/);
+#endif
+
+void main()
+{
+  char reply[20], filename[100];
+  varchar key[20];
+  short ok = 1;
+
+  /* Connect to the database. */
+  do_connect();
+
+  printf("Do you want to create (or recreate) the EXECUTABLES table (y/n)? ");
+  gets(reply);
+
+  if ((reply[0] == 'y') || (reply[0] == 'Y'))
+    create_table();
+
+  /* Print the menu, and read in the user's selection. */
+  print_menu();
+  gets(reply);
+
+  while (ok)
+  {
+    switch(reply[0]) {
+    case 'I': case 'i':
+      /* User selected insert - get the key and file name. */
+      printf("Enter the key under which you will insert this executable: ");
+      key.len = strlen(gets((char *)key.arr));
+      printf("Enter the filename to insert under key '%.*s'.\n",
+             key.len, key.arr);
+      printf("If the file is not in the current directory, enter the full\n");
+      printf("path: ");
+      gets(filename);
+      do_insert((varchar *)&key, filename);
+      break;
+    case 'R': case 'r':
+      /* User selected retrieve - get the key and file name. */
+      printf("Enter the key for the executable you wish to retrieve: ");
+      key.len = strlen(gets((char *)key.arr));
+      printf("Enter the file to write the executable stored under key ");
+      printf("%.*s into.  If you\n", key.len, key.arr);
+      printf("don't want the file in the current directory, enter the\n");
+      printf("full path: ");
+      gets(filename);
+      do_retrieve((varchar *)&key, filename);
+      break;
+    case 'L': case 'l':
+      /* User selected list - just call the list routine. */
+      list_executables();
+      break;
+    case 'D': case 'd':
+      /* User selected delete - get the key for the executable to delete. */
+      printf("Enter the key for the executable you wish to delete: ");
+      key.len = strlen(gets((char *)key.arr));
+      do_delete((varchar *)&key);
+      break;
+    case 'Q': case 'q':
+      /* User selected quit - just end the loop. */
+      ok = 0;
+      break;
+    default:
+      /* Invalid selection. */
+      printf("Invalid selection.\n");
+      break;
+    }
+
+    if (ok)
+    {
+      /* Print the menu again. */
+      print_menu();
+      gets(reply);
+    }
+  }
+
+  EXEC SQL COMMIT WORK RELEASE;
+}
+
+
+/* Connect to the database. */
+void do_connect()
+{
+  /* Note this declaration: uid is a char * pointer, so Oracle
+     will do a strlen() on it at runtime to determine the length.
+   */
+  char *uid = "scott/tiger";
+
+  EXEC SQL WHENEVER SQLERROR DO sql_error("do_connect():CONNECT");
+  EXEC SQL CONNECT :uid;
+
+  printf("Connected.\n");
+}
+
+
+/* Creates the executables table. */
+void create_table()
+{
+  /* We are going to check for errors ourselves for this statement. */
+  EXEC SQL WHENEVER SQLERROR CONTINUE;
+
+  EXEC SQL DROP TABLE EXECUTABLES;
+  if (sqlca.sqlcode == 0)
+    {
+      printf("EXECUTABLES table successfully dropped.  ");
+      printf("Now creating new table...\n");
+    }
+  else if (sqlca.sqlcode == NON_EXISTENT)
+    {
+      printf("EXECUTABLES table does not exist.  ");
+      printf("Now creating new table...\n");
+    }
+  else
+    sql_error("create_table()"); 
+
+  /* Reset error handler. */
+  EXEC SQL WHENEVER SQLERROR DO sql_error("create_table():CREATE TABLE");
+
+  EXEC SQL CREATE TABLE EXECUTABLES
+    ( name VARCHAR2(30), length NUMBER(10), binary BLOB ) ;
+
+  printf("EXECUTABLES table created.\n");
+}
+
+/* Opens the binary file identified by 'filename' for reading, and writes
+   it into into a Binary LOB.  Returns the actual length of the file read.
+ */
+ub4 read_file(filename, blob)
+  char *filename;
+  OCIBlobLocator *blob;
+{
+  long_varraw *lvr;
+  ub4      bufsize;
+  ub4      amt;
+  ub4      filelen, remainder, nbytes;
+  ub4      offset = 1;
+  boolean  last = FALSE;
+  FILE    *in_fd;
+
+  /* Open the file for reading. */
+  in_fd = fopen(filename, "rb");
+  if (in_fd == (FILE *)0)
+    return (ub4)0;
+
+  /* Determine Total File Length - Total Amount to Write to BLOB */
+  (void) fseek(in_fd, 0L, SEEK_END);
+  amt = filelen = (ub4)ftell(in_fd);
+
+  /* Determine the Buffer Size and Allocate the LONG VARRAW Object */
+  bufsize = 2048;
+  lvr = (long_varraw *)malloc(sizeof(ub4) + bufsize);
+
+  nbytes = (filelen > bufsize) ? bufsize : filelen;
+      
+  /* Reset the File Pointer and Perform the Initial Read */
+  (void) fseek(in_fd, 0L, SEEK_SET);
+  lvr->len = fread((void *)lvr->buf, (size_t)1, (size_t)nbytes, in_fd);
+  remainder = filelen - nbytes;
+
+  EXEC SQL WHENEVER SQLERROR DO sql_error("read_file():WRITE");
+
+  if (remainder == 0)
+    {
+      /* Write the BLOB in a Single Piece */
+      EXEC SQL LOB WRITE ONE :amt
+         FROM :lvr WITH LENGTH :nbytes INTO :blob AT :offset;
+    }
+  else
+    {
+      /* Write the BLOB in Multiple Pieces using Standard Polling */
+      EXEC SQL LOB WRITE FIRST :amt
+         FROM :lvr WITH LENGTH :nbytes INTO :blob AT :offset;
+
+      do {
+
+        if (remainder > bufsize)
+          nbytes = bufsize;
+        else
+          {
+            nbytes = remainder;
+            last = TRUE;
+          }
+
+        if ((lvr->len = fread(
+              (void *)lvr->buf, (size_t)1, (size_t)nbytes, in_fd)) != nbytes)
+          last = TRUE;
+
+        if (last)
+          {
+            /* Write the Final Piece */
+            EXEC SQL LOB WRITE LAST :amt
+               FROM :lvr WITH LENGTH :nbytes INTO :blob;
+          }
+        else
+          {
+            /* Write an Interim Piece - Still More to Write */
+            EXEC SQL LOB WRITE NEXT :amt
+               FROM :lvr WITH LENGTH :nbytes INTO :blob;  
+          }
+
+        remainder -= nbytes;
+
+      } while (!last && !feof(in_fd));
+    }
+
+  /* Close the file, and return the total file size. */
+  fclose(in_fd);
+  free(lvr);
+  return filelen;
+}
+
+
+/* Generic error handler.  The 'routine' parameter should contain the name
+   of the routine executing when the error occured.  This would be specified
+   in the 'EXEC SQL WHENEVER SQLERROR DO sql_error()' statement.
+ */
+void sql_error(routine)
+  char *routine;
+{
+  char message_buffer[512];
+  size_t buffer_size;
+  size_t message_length;
+
+  /* Turn off the call to sql_error() to avoid a possible infinite loop */
+  EXEC SQL WHENEVER SQLERROR CONTINUE;
+
+  printf("\nOracle error while executing %s!\n", routine);
+
+  /* Use sqlglm() to get the full text of the error message. */
+  buffer_size = sizeof(message_buffer);
+  sqlglm(message_buffer, &buffer_size, &message_length);
+  printf("%.*s\n", message_length, message_buffer);
+
+  EXEC SQL ROLLBACK WORK RELEASE;
+  exit(1);
+}
+
+
+/* Opens the binary file identified by 'filename' for writing, and copies
+   the contents of the Binary LOB into it.
+ */
+void write_file(filename, blob)
+  char *filename;
+  OCIBlobLocator *blob;
+{
+  FILE        *out_fd;       /* File descriptor for the output file */
+  ub4          amt;
+  ub4          bufsize;
+  long_varraw *lvr;
+
+  /* Determine the Buffer Size and Allocate the LONG VARRAW Object */
+  bufsize = 2048;
+  lvr = (long_varraw *)malloc(sizeof(ub4) + bufsize);
+
+  /* Open the output file for Writing */
+  out_fd = fopen(filename, "wb");
+  if (out_fd == (FILE *)0)
+    return;
+
+  amt = 0;             /* Initialize for Standard Polling (Possibly) */
+  lvr->len = bufsize;                       /* Set the Buffer Length */
+
+  EXEC SQL WHENEVER SQLERROR DO sql_error("write_file():READ");
+
+  /* READ the BLOB using a Standard Polling Loop */
+  EXEC SQL WHENEVER NOT FOUND DO break;
+  while (TRUE)
+    {
+      EXEC SQL LOB READ :amt FROM :blob INTO :lvr WITH LENGTH :bufsize;
+      (void) fwrite((void *)lvr->buf, (size_t)1, (size_t)lvr->len, out_fd);
+    }
+  
+  EXEC SQL WHENEVER NOT FOUND CONTINUE;
+
+  /* Write the Final Piece (or First and Only Piece if not Polling) */
+  (void) fwrite((void *)lvr->buf, (size_t)lvr->len, (size_t)1, out_fd);
+
+  /* Close the Output File and Return */
+  fclose(out_fd);
+  free(lvr);
+  return;
+}
+
+
+
+/* Inserts the binary file identified by file into the
+ * executables table identified by key.
+ */
+void do_insert(key, file)
+  varchar *key;
+  char *file;
+{
+  OCIBlobLocator *blob;
+  ub4 loblen, fillen;
+
+  EXEC SQL ALLOCATE :blob;
+
+  EXEC SQL WHENEVER SQLERROR DO sql_error("do_insert():INSERT/SELECT");
+
+  EXEC SQL SAVEPOINT PREINSERT;
+  EXEC SQL INSERT
+    INTO executables (name, length, binary) VALUES (:key, 0, empty_blob());
+
+  EXEC SQL SELECT binary INTO :blob 
+             FROM executables WHERE name = :key FOR UPDATE;
+
+  printf(
+    "Inserting file '%s' under key '%.*s'...\n", file, key->len, key->arr); 
+
+  fillen = read_file(file, blob);
+  EXEC SQL LOB DESCRIBE :blob GET LENGTH INTO :loblen;
+
+  if ((fillen == 0) || (fillen != loblen))
+    {
+      printf("Problem reading file '%s'\n", file);
+      EXEC SQL ROLLBACK TO SAVEPOINT PREINSERT;
+      EXEC SQL FREE :blob;
+      return;
+    }
+
+  EXEC SQL WHENEVER SQLERROR DO sql_error("do_insert():UPDATE");
+  EXEC SQL UPDATE executables
+    SET length = :loblen, binary = :blob WHERE name = :key;
+
+  EXEC SQL COMMIT WORK;
+
+  EXEC SQL FREE :blob;
+  EXEC SQL COMMIT;
+  printf("Inserted.\n");
+}
+
+
+/* Retrieves the executable identified by key into file */
+void do_retrieve(key, file)
+  varchar *key;
+  char *file;
+{
+  OCIBlobLocator *blob;
+
+  printf("Retrieving executable stored under key '%.*s' to file '%s'...\n",
+         key->len, key->arr, file);
+
+  EXEC SQL ALLOCATE :blob;
+
+  EXEC SQL WHENEVER NOT FOUND continue;
+  EXEC SQL SELECT binary INTO :blob FROM executables WHERE name = :key;
+
+  if (sqlca.sqlcode == NOT_FOUND)
+    printf("Key '%.*s' not found!\n", key->len, key->arr);
+  else 
+    {
+      write_file(file, blob);
+      printf("Retrieved.\n");
+    }
+ 
+  EXEC SQL FREE :blob;
+}
+
+
+/* Delete an executable from the database */
+void do_delete(key)
+  varchar *key;
+{
+  EXEC SQL WHENEVER SQLERROR DO sql_error("do_delete():DELETE");
+  EXEC SQL DELETE FROM executables WHERE name = :key;
+
+  if (sqlca.sqlcode == NOT_FOUND)
+    printf("Key '%.*s' not found!\n", key->len, key->arr);
+  else
+    printf("Deleted.\n");
+}
+
+
+/* List all executables currently stored in the database */
+void list_executables()
+{
+  char key[21];
+  ub4  length;
+
+  EXEC SQL WHENEVER SQLERROR DO sql_error("list_executables");
+
+  EXEC SQL DECLARE key_cursor CURSOR FOR
+    SELECT name, length FROM executables;
+
+  EXEC SQL OPEN key_cursor;
+
+  printf("\nExecutables           Length (bytes)\n");
+  printf("--------------------  --------------\n");
+
+  EXEC SQL WHENEVER NOT FOUND DO break;
+  while (1)
+  {
+    EXEC SQL FETCH key_cursor INTO :key, :length;
+    printf("%s      %10d\n", key, length);
+  }
+
+  EXEC SQL WHENEVER NOT FOUND CONTINUE;
+  EXEC SQL CLOSE key_cursor;
+
+  printf("\nTotal Executables: %d\n", sqlca.sqlerrd[2]);  
+}
+
+
+/* Prints the menu selections. */
+void print_menu()
+{
+  printf("\nSample 4 Menu.  Would you like to:\n");
+  printf("(I)nsert a new executable into the database\n");
+  printf("(R)etrieve an executable from the database\n");
+  printf("(L)ist the executables stored in the database\n");
+  printf("(D)elete an executable from the database\n");
+  printf("(Q)uit the program\n\n");
+  printf("Enter i, r, l, or q: ");
+}

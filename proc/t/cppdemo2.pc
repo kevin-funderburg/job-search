@@ -1,0 +1,59 @@
+
+// Pro*C/C++ sample program demonstrating a simple use of Cursor Variables
+// implemented within a C++ class framework.  Build this program as follows
+//
+//   1. Execute the cppdemo2.sql script within SQL*Plus
+//   2. Precompile the empclass.pc program as follows
+//      > proc code=cpp sqlcheck=full user=scott/tiger lines=yes empclass
+//   3. Precompile the cppdemo2.pc program as follows
+//      > proc code=cpp lines=yes cppdemo2
+//   4. Compile and Link
+//
+// Note that you may have to specify various include directories using the
+// include option when precompiling.
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <sqlca.h>
+
+static void sql_error()
+{
+  printf("%.*s\n", sqlca.sqlerrm.sqlerrml, sqlca.sqlerrm.sqlerrmc);
+  EXEC SQL WHENEVER SQLERROR CONTINUE;
+  EXEC SQL ROLLBACK WORK RELEASE;
+  exit(1);  
+}
+
+// Physically include the emp class definition in this module.
+EXEC SQL INCLUDE empclass.h;
+
+int main()
+{
+  EXEC SQL BEGIN DECLARE SECTION;
+    char *uid = "scott/tiger";
+  EXEC SQL END DECLARE SECTION;
+
+  EXEC SQL WHENEVER SQLERROR DO sql_error();
+  EXEC SQL CONNECT :uid;
+
+  emp *e = new emp(); // Invoke Constructor - ALLOCATE Cursor Variable.
+
+  e->open();          // Open the Cursor.
+
+  while (1)
+    {
+      // Fetch from the Cursor, catching the NOT FOUND condition
+      // thrown by the fetch() member function.
+      try { e->fetch(); } catch (int code)  
+        { if (code == 1403) break; }
+      printf("Employee:  %s[%d]\n", e->ename, e->empno);
+    }
+
+  e->close();         // Close the Cursor.
+
+  delete e;           // Invoke Destructor - FREE Cursor Variable.
+
+  EXEC SQL ROLLBACK WORK RELEASE;
+  return (0);
+}
+

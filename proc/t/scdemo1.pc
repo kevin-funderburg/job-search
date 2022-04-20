@@ -1,0 +1,262 @@
+/*
+ * This demo program exhibits the scrollable cursor feature
+ * used with oracle dynamic method 4. The scrollable cursor
+ * feature can also be used with ANSI dynamic method 4.
+ * 
+ * This program takes as argument the username/passwd. Once
+ * logged in, it prompts for a select query.It then prompts
+ * for the orientation and prints the results of the query.
+ *
+ * Before executing this example, make sure that the hr/hr
+ * schema exists.
+ */
+
+#include <stdio.h> 
+#include <sqlca.h> 
+#include <sqlda.h> 
+#include <string.h>
+#include <ctype.h>
+ 
+#include <sqlcpr.h>
+#include <stdlib.h>
+
+#include <setjmp.h>
+
+
+#define MAX_SELECT_ITEMS    200
+#define MAX_CHARS           500
+
+/* Maximum size of a select-list item name */
+#define MAX_NAME_SIZE       50  
+ 
+SQLDA   *selda; 
+SQLDA   *bind_des; 
+jmp_buf beginEnv;
+jmp_buf loopEnv;
+
+/* Data buffer */
+char c_data[MAX_SELECT_ITEMS][MAX_CHARS];
+ 
+char username[60];
+char stmt[500];
+char stmt2[500];
+
+void sql_error()
+{
+    char msgbuf[512];
+    size_t msgbuf_len, msg_len;
+
+    msgbuf_len = sizeof(msgbuf);
+    sqlglm(msgbuf, &msgbuf_len, &msg_len);
+
+    printf ("\n\n%.*s\n", msg_len, msgbuf);
+
+    EXEC SQL WHENEVER SQLERROR CONTINUE;
+    EXEC SQL ROLLBACK WORK RELEASE;
+    exit(EXIT_FAILURE);
+}
+
+void sql_loop_error()
+{
+    char msgbuf[512];
+    size_t msgbuf_len, msg_len;
+    int code = sqlca.sqlcode;
+
+    msgbuf_len = sizeof(msgbuf);
+    sqlglm(msgbuf, &msgbuf_len, &msg_len);
+
+    printf ("\n%.*s\n", msg_len, msgbuf);
+    printf("The error code is %d\n", sqlca.sqlcode);
+    if(code==-900 || code == -942 || code == -904)
+      longjmp(beginEnv, 1);
+
+    longjmp(loopEnv, 1);
+}
+
+void no_data_found()
+{
+  printf("\nNo Data available at the specified offset\n");
+  longjmp(loopEnv, 1);
+}
+
+void main(int argc, char *argv[]) 
+{
+    int i, n;
+    int sli;     /* select-list item */
+    int offset;
+    int contFlag;
+    char bindVar[20];
+    char *u, temp[3];
+    char choice;
+
+    /* Error Handler  */
+    EXEC SQL WHENEVER SQLERROR DO sql_error();
+
+
+    if(argc == 1)
+    {
+      printf("Logging in as default user hr\n");
+      strcpy(username, "hr/hr");
+    }
+    else
+      strcpy(username, argv[1]);
+
+    /* Establish a connection to the data base */
+    EXEC SQL CONNECT :username;
+
+    u = username;
+    while(*++u != '/');
+    *u = '\0';
+
+    /* Error Handler */
+    EXEC SQL WHENEVER SQLERROR DO sql_loop_error();
+    for(;;)
+    {
+
+      setjmp(beginEnv);
+      printf("[%s] SQL > ", username);
+      gets(stmt);
+      if(!strlen(stmt))
+        continue;
+
+      for (i=0 ; i < strlen(stmt) ; i++)
+           stmt2[i] = tolower(stmt[i]) ;
+      stmt2[i]=0 ;
+      if(!strcmp(stmt2, "exit"))
+        break;
+
+      selda = sqlald(MAX_SELECT_ITEMS, MAX_NAME_SIZE, 0);
+      bind_des = sqlald(MAX_SELECT_ITEMS, MAX_NAME_SIZE, 30);
+
+      /* prepare an sql statement for the query*/
+      EXEC SQL PREPARE S FROM :stmt;
+
+      /* Declare a cursor as scrollable */
+      EXEC SQL DECLARE C SCROLL CURSOR FOR S;
+
+      for(i=0; i<MAX_SELECT_ITEMS; i++)
+      {
+        bind_des->I[i] = (short *) malloc(sizeof (short));
+        bind_des->V[i] = (char *) malloc(1);
+      }
+      bind_des->N = MAX_SELECT_ITEMS;
+
+      EXEC SQL DESCRIBE BIND VARIABLES FOR S INTO bind_des;
+
+      /* set up the bind variables */
+      if(bind_des->F < 0)
+      {
+        printf("Bind descriptor, value exceeds the limit\n");
+        exit(-1);
+      }
+
+      bind_des->N = bind_des->F;
+      for(i=0; i<bind_des->F; i++)
+      {
+        printf("Enter the value for bind variable %.*s: ",
+               (int)bind_des->C[i], bind_des->S[i]);
+
+        fgets(bindVar, sizeof(bindVar), stdin);
+        n = strlen(bindVar) - 1;
+
+        bind_des->L[i] = n;
+        bind_des->V[i] = (char *) realloc(bind_des->V[i], 
+                         (bind_des->L[i] +1));
+
+        strncpy(bind_des->V[i], bindVar, n);
+        if((strncmp(bind_des->V[i], "NULL", 4) == 0) ||
+              (strncmp(bind_des->V[i], "null", 4) == 0))
+          *bind_des ->I[i] = -1;
+        else
+          *bind_des ->I[i] = 0;
+
+        bind_des->T[i] = 1;
+      }
+
+      /* open the cursor */
+      EXEC SQL OPEN C USING DESCRIPTOR bind_des;
+      EXEC SQL DESCRIBE SELECT LIST FOR S INTO selda;
+
+      if(selda->F < 0)
+      {
+        printf("Select descriptor, value exceeds the limit\n");
+        exit(-1);
+      }
+        
+      selda->N = selda->F;
+      for (sli = 0; sli < selda->N; sli++)
+      {
+          /* Set addresses of heads of the arrays 
+             in the V element. */
+          selda->V[sli] = c_data[sli];
+          /* Convert everything to varchar on output. */
+          selda->T[sli] = 1;
+          /* Set the maximum lengths. */
+          selda->L[sli] = MAX_CHARS;
+      }
+
+      while(1)
+      {
+
+        printf("\n\nEnter the row number to be fetched \n");
+        printf("1.ABSOLUTE\n");
+        printf("2.RELATIVE\n");
+        printf("3.FIRST \n");
+        printf("4.NEXT \n");
+        printf("5.PREVIOUS \n");
+        printf("6.LAST \n");
+        printf("7.CURRENT \n");
+        printf("Enter your choice --> ");
+        scanf("%c",&choice);
+
+        EXEC SQL WHENEVER NOT FOUND DO no_data_found();
+        switch(choice)
+        {
+          case '1': printf("\nEnter Offset :");
+                    scanf("%d",&offset);
+                    EXEC SQL FETCH ABSOLUTE :offset C USING DESCRIPTOR selda;
+                    break;
+          case '2': printf("\nEnter Offset :");
+                    scanf("%d",&offset);
+                    EXEC SQL FETCH RELATIVE :offset C USING DESCRIPTOR selda;
+                    break;
+          case '3': EXEC SQL FETCH FIRST C USING DESCRIPTOR selda;
+                    break;
+          case '4': EXEC SQL FETCH NEXT C USING DESCRIPTOR selda;
+                    break;
+          case '5': EXEC SQL FETCH PRIOR C USING DESCRIPTOR selda;
+                    break;
+          case '6': EXEC SQL FETCH LAST C USING DESCRIPTOR selda;
+                    break;
+          case '7': EXEC SQL FETCH CURRENT C USING DESCRIPTOR selda;
+                    break;
+          default : printf("Invalid choice\n");
+                    continue;
+        }
+
+        /* print the row */
+        for(sli=0; sli<selda->N; sli++)
+          printf("%.10s ", c_data[sli]);
+
+        puts("");
+
+        setjmp(loopEnv);
+        getchar();
+        contFlag = 'x';
+        while(contFlag != 'Y' && contFlag != 'N')
+        {
+          printf("\nContinue with the current fetch? [y/n] :");
+          contFlag = toupper(getchar());
+        }
+
+        if(contFlag != 'Y')
+          break;
+      }
+
+        EXEC SQL CLOSE C;
+    }
+
+    EXEC SQL ROLLBACK RELEASE;
+    exit(EXIT_SUCCESS);
+}
+

@@ -1,0 +1,101 @@
+
+/**************************************************************
+Sample Program 5:  SQL*Forms User Exit
+
+This user exit concatenates form fields.  To call the user 
+exit from a SQL*Forms trigger, use the syntax
+
+   user_exit('CONCAT field1, field2, ..., result_field');
+
+where user_exit is a packaged procedure supplied with SQL*Forms
+and CONCAT is the name of the user exit.  A sample form named
+CONCAT invokes the user exit.
+**************************************************************/
+
+#define min(a, b) ((a < b) ? a : b)
+#include <stdio.h>
+#include <string.h>
+
+/* Include the SQL Communications Area, a structure through which
+ * Oracle makes runtime status information such as error
+ * codes, warning flags, and diagnostic text available to the
+ * program.
+ */
+#include <sqlca.h>
+
+/* All host variables used in embedded SQL in this example
+ * appear in the Declare Section.
+ */
+EXEC SQL BEGIN DECLARE SECTION;
+    VARCHAR   field[81];
+    VARCHAR   value[81];
+    VARCHAR   result[241];
+EXEC SQL END DECLARE SECTION;
+
+
+/* Define the user exit, called "concat". */
+int concat(cmd, cmdlen, msg, msglen, query)
+char *cmd;     /* command line in trigger step ("CONCAT...") */
+int  *cmdlen;  /* length of command line */
+char *msg;     /* trigger step failure message from form */
+int  *msglen;  /* length of failure message */
+int  *query;   /* TRUE if invoked by post-query trigger,
+                  FALSE otherwise */
+{
+    char *cp = cmd + 7;    /* pointer to field list in
+                              cmd string; 7 characters
+                              are needed for "CONCAT " */
+    char *fp = (char*)&field.arr[0];  /* pointer to a field name in
+                                         cmd string */
+    char  errmsg[81];      /* message returned to SQL*Forms
+                              on error */
+    int   errlen;          /* length of message returned
+                              to SQL*Forms */
+
+/* Branch to label sqlerror if an ORACLE error occurs. */
+    EXEC SQL WHENEVER SQLERROR GOTO sqlerror;
+
+    result.arr[0] = '\0';
+
+/* Parse field names from cmd string. */
+    for (; *cp != '\0'; cp++)
+    {
+       if (*cp != ',' && *cp != ' ')
+           /* Copy a field name into field.arr from cmd. */
+       {
+           *fp = *cp;
+           fp++;
+       }
+       else
+           if (*cp == ' ')
+           {   /* Have whole field name now. */
+               *fp = '\0';
+               field.len = strlen((char *) field.arr);
+               /* Get field value from form. */
+               EXEC IAF GET :field INTO :value;
+               value.arr[value.len] = '\0';
+               strcat((char *) result.arr, (char *) value.arr);
+               fp = (char *)&field.arr[0];  /* Reset field pointer. */
+           }
+    }
+
+/* Have last field name now. */
+    *fp = '\0';
+    field.len = strlen((char *) field.arr);
+    result.len = strlen((char *) result.arr);
+
+/* Put result into form. */
+    EXEC IAF PUT :field VALUES (:result);
+
+/* Trigger step succeeded. */
+    return(IAPSUCC);
+
+sqlerror:
+    strcpy(errmsg, "CONCAT: ");
+    strncat(errmsg, sqlca.sqlerrm.sqlerrmc, min(72,
+        sqlca.sqlerrm.sqlerrml));
+    errlen = strlen(errmsg);
+/* Pass error message to SQL*Forms status line. */
+    sqliem(errmsg, &errlen);
+    return(IAPFAIL);  /* Trigger step failed. */
+}

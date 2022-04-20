@@ -1,0 +1,668 @@
+
+
+            /* ************************************************* */
+            /*   Demo program for Object manipulation in Pro*C   */
+            /* ************************************************* */
+
+
+/*****************************************************************************
+ *
+ * In SQL*Plus, run the SQL script objdemo1.sql to create:
+ *   - 2 object types "person" and "address", 
+ *              with "person" having an embedded attribute of type "address"
+ *   - 1 typed table Persons to hold "person" objects
+ *   - 1 table employees to hold employee info
+ *
+ * Next, run the Object Type Translator (OTT) to generate typedefs of C structs
+ * corresponding to the "person" and "address" types in the databases:
+ *  ott int=objdemo1.typ outtype=out.typ hfile=objdemo1.h code=c
+ *   user=scott/tiger
+ *
+ * Then, run the Pro*C/C++ Precompiler as follows:
+ *   proc objdemo1 intype=out.typ 
+ *
+ * Finally, link the generated code using the Pro*C Makefile:
+ *   (Compiling and Linking applications are platform specific steps)
+ *
+ * Executable is named "objdemo1"
+ ****************************************************************************/
+
+
+/* Include files */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sqlda.h>
+
+#include <sqlca.h>                                /* SQL Communications Area */
+#include <sql2oci.h>         /* SQLLIB interoperability routines for OCI8 */
+#include "objdemo1.h"        /* OTT-generated header with C typedefs for the */
+                                    /* database types "person" and "address" */
+/* Macros */
+#ifndef EXIT_SUCCESS
+#  define EXIT_SUCCESS 0
+#endif
+#ifndef EXIT_FAILURE
+#  define EXIT_FAILURE 1
+#endif
+
+#define ARRAY_SIZE 10
+
+
+/* Function prototypes */
+#if defined(__STDC__)
+  void   Database_Connect(char *);
+  void   print_sql_error(int);
+  void   print_person_details(person *p, person_ind *p_ind);
+  void   print_address_details(address *a, address_ind *a_ind);
+  void   load_person_data(person *p, person_ind *p_ind, int i);
+  void   Select_Attributes(void);
+  void   Update_Attributes(void);
+  void   Select_Object(void);
+  void   Update_Object(void);
+  void   Insert_Object(void);    
+  void   Select_Ref(void);
+  void   Update_Ref(void);
+  void   Bulk_Insert_Objects(void);
+  void   Bulk_Select_Objects(void);
+#else
+  void   Database_Connect();
+  void   print_sql_error();
+  void   print_person_details();
+  void   print_address_details();
+  void   load_person_data();
+  void   Select_Attributes();
+  void   Update_Attributes();
+  void   Select_Object();
+  void   Update_Object();
+  void   Insert_Object();    
+  void   Select_Ref();
+  void   Update_Ref();
+  void   Bulk_Insert_Objects();
+  void   Bulk_Select_Objects();
+#endif
+
+/* Global variables */
+
+char     *uid = "scott/tiger";    /* user id and password */
+int       ftl =  TRUE;            /* fatal error flag */
+sword     status;                 /* result of OCI calls */
+
+/* Error handling for embedded SQL statements */
+
+exec sql whenever sqlerror do print_sql_error(ftl);
+
+
+void main()
+{
+  printf("\n*** STARTING OBJECT DEMO ***\n");
+
+  /* Connect to the database */
+  Database_Connect(uid);
+
+  /* DML operations on single objects */
+
+  Select_Attributes();                           /* Select Person attributes */
+  Update_Attributes();                          /* Update Address attributes */
+
+  Select_Object();                                 /* Select a person object */
+  Insert_Object();                             /* Insert a new person object */
+  Update_Object();                               /* Update an address object */
+
+  Select_Ref();                            /* Select Person objects via REFs */
+  Update_Ref();                            /* Update Person objects via REFs */
+  
+
+  /* DML operations on multiple objects */
+
+  Bulk_Insert_Objects();  /* Insert multiple person objects via host arrays */
+  Bulk_Select_Objects();  /* Select multiple person objects via host arrays 
+                             and cursor fetches */
+
+  exec sql rollback work release;
+  
+  printf("\n*** END OF OBJECT DEMO ***\n");
+  exit(EXIT_SUCCESS);
+}
+
+
+/*****************************************************************************
+ * The following function shows how to select individual attributes of objects 
+ ****************************************************************************/
+
+void  Select_Attributes()
+{
+  /*
+   * Select individual scalar attributes of a person object into host C types
+   * such as int, char, or VARCHAR[n].  
+   */
+  
+  char     name[20];
+  VARCHAR  addr[50];
+  int ssn;
+  
+  
+  printf("\nSelecting person attributes..\n");
+
+  exec sql whenever not found goto not_found;
+  
+  exec sql 
+    select p.name, p.ssn, 
+           p.addr.street || ', ' || p.addr.city 
+                       || ', ' || p.addr.state 
+                       || ', ' || p.addr.zip_code
+      into :name, :ssn, :addr
+        from persons p
+          where p.addr.state = 'WA';
+
+  /* 
+   * You should always check for nulls before printing.  This demo program
+   * omits this check in some places for brevity.
+   */  
+
+  printf("Selected person attributes :\n \
+              name    =%20s\n \
+              ssn     = %d\n \
+              address = %.*s\n",
+         name, ssn, addr.len, addr.arr);
+  
+  return;
+
+not_found:
+  printf("\nNo data found for SELECT attributes.\n");
+  exec sql whenever not found continue;
+}
+
+
+/******************************************************************************
+ * The following function demonstrates how to update attributes of an object.
+ *****************************************************************************/
+
+void  Update_Attributes()
+{
+  /* 
+   * Update a person object to have a new address.  This example illustrates
+   * the use of constructors in SQL to create object types from scalars.
+   */
+  
+  char *name       = "William Bates";
+  char *new_street = "New Street";
+  char *new_city   = "New City";
+  char *new_state  = "WA";
+  char *new_zip    = "53241";
+  
+  printf("\nUpdating person attributes..\n");
+    
+  exec sql whenever not found goto :not_found;
+    
+  exec sql 
+    update persons 
+      set addr = Address(:new_street, :new_city, :new_state, :new_zip)
+        where name = :name;
+  
+  printf("Updated address attribute of %d person.\n", 
+         sqlca.sqlerrd[2]);
+  
+  return;
+  
+ not_found: 
+  printf("\nNo data found for UPDATE attributes.\n");
+  exec sql whenever not found continue;
+}
+
+/******************************************************************************
+ * The following function shows how to select an object into the object cache.
+ *****************************************************************************/
+ 
+void Select_Object()
+{
+    /*
+     *  NOTES: 
+     *    When selecting an object as a whole, you must use a pointer
+     *    to the appropriate C struct as generated by OTT). 
+     *
+     *    When selecting an object from a typed table like Persons (as opposed
+     *    to an object column in a relational table, e.g., office_addr in table
+     *    employees), you have to use the VALUE function with a table alias.
+     */
+
+    person     *p         = (person *)0;
+    person_ind *p_ind     = (person_ind *)0; 
+
+    exec sql allocate :p:p_ind;
+
+    printf("\nSelecting person object into object cache..\n");
+    
+    exec sql whenever not found go to :not_found;
+
+    exec sql 
+      select value(p) 
+        into :p:p_ind
+          from persons p
+            where p.addr.state = 'WA';
+     
+    print_person_details(p, p_ind);
+
+    /* 
+     * Memory for the person object was allocated in the object cache, and
+     * it can be freed using the free statement below.  The space allocated 
+     * for the indicator variable (if any) can also be freed by this command.
+     */
+    
+    exec sql free :p:p_ind;
+        
+    return;
+    
+  not_found: 
+    printf("\nNo data found for SELECT object.\n");
+    exec sql whenever not found continue;
+  }
+
+
+/*****************************************************************************
+ * The following function shows how to insert a person object.
+ ****************************************************************************/ 
+
+void Insert_Object() 
+{
+  char *new_name   = "NEW PERSON";
+  int new_ssn      = 987654;
+  char *new_street = "NEW STREET";
+  char *new_city   = "NEW CITY";
+  char *new_state  = "NS";
+  char *new_zip    = "NZIP";
+
+  /*
+   * Insert a new person object into the Persons table
+   */
+
+  exec sql 
+    insert into persons
+      values (person(:new_name, :new_ssn,
+                     address(:new_street, :new_city, :new_state, :new_zip)));
+                
+  printf("\nInserted %d person object with name NEW PERSON.\n", 
+           sqlca.sqlerrd[2]);
+
+  return;
+}
+
+
+/****************************************************************************
+ * The following function shows how to update an object in the object cache.
+ ****************************************************************************/ 
+
+void Update_Object() 
+{
+  address     *addr_ptr      = (address *)0;
+  address_ind *addr_ind_ptr  = (address_ind *)0;
+  address     *new_addr_ptr  = (address *)0;
+  int empno = 1001;
+
+  exec sql allocate :addr_ptr:addr_ind_ptr;
+
+  printf("\nUpdating address object..\n");
+  printf("First select current office address of William Bates into the cache..");
+
+ exec sql whenever not found go to :not_found;
+
+  exec sql 
+    select office_addr
+      into :addr_ptr:addr_ind_ptr
+        from employees
+          where empnumber = :empno;
+
+  printf("\nCurrent office address of William Bates : \n");
+  print_address_details(addr_ptr, addr_ind_ptr);
+
+  /* Now update the street attribute of office address in the object cache  */
+
+  {
+    text *street=(text *)"100 Oracle Parkway";
+    exec sql object set street of :addr_ptr to :street;
+  }
+  /* Put updated object into the database */
+
+  exec sql 
+    update employees
+      set office_addr = :addr_ptr:addr_ind_ptr
+        where empnumber = :empno;
+  
+  printf("\nUpdated %d employee to have new address : ", 
+           sqlca.sqlerrd[2]);
+
+  /* Select new address to verify update */
+  
+  exec sql allocate :new_addr_ptr;
+
+  exec sql 
+    select office_addr
+      into :new_addr_ptr
+        from employees
+          where empnumber = :empno;
+
+  printf("\nNew office address of William Bates : \n");
+  print_address_details(new_addr_ptr, addr_ind_ptr);
+
+
+  /* free object cache memory after database operations are done */
+  exec sql free :addr_ptr:addr_ind_ptr;
+  exec sql free :new_addr_ptr;
+
+  return;
+  
+  not_found:
+    printf("\nNo data found for UPDATE object.\n");
+    exec sql whenever not found continue;
+}
+
+/****************************************************************************
+ * The following function illustrates selecting an object via a REF.
+ ****************************************************************************/ 
+
+void  Select_Ref()
+{ 
+  char       *name         = (char *)"William Bates";
+  person     *mgr_ptr      = (person  *)   0;
+  person_ind *mgr_ind_ptr  = (person_ind *)0;
+
+  exec sql allocate :mgr_ptr:mgr_ind_ptr;
+
+  printf("\nSelecting manager via a REF..\n");
+
+  exec sql whenever not found go to :not_found;
+  
+  exec sql
+    select deref(manager)
+      into :mgr_ptr:mgr_ind_ptr
+        from employees e
+           where e.person_data.name = :name;
+  
+  printf("\n Current manager of William Bates : \n");
+  print_person_details(mgr_ptr, mgr_ind_ptr);
+         
+  /* Free the object cache memory when done processing */
+  exec sql free :mgr_ptr:mgr_ind_ptr;
+  
+  return;    
+
+ not_found:
+  printf("\nNo data found for SELECT REF.\n");
+  exec sql whenever not found continue;
+}
+
+/****************************************************************************
+ * The following function shows how to update a REF to a person object.
+ ****************************************************************************/ 
+
+void  Update_Ref()
+{
+  int empno = 1001;
+  char *new_manager = (char *)"NEW PERSON";
+    
+  exec sql whenever not found goto :not_found;
+
+  printf("\nUpdating manager REF..\n"); 
+  
+  exec sql update employees
+    set manager = (select ref(p) from persons p 
+                   where p.name = :new_manager)
+      where empnumber = :empno;
+  
+  printf("Updated manager of %d employee. Selecting back to verify update..\n",
+         sqlca.sqlerrd[2]);
+
+  /* Select manager back to verify the update */
+
+  Select_Ref();
+
+  return;    
+
+ not_found:
+  printf("\nNo data found for UPDATE REF.\n");
+  exec sql whenever not found continue;
+}
+
+
+/* ***************************************************************************
+ *  The following function uses a host and indicator array to insert multiple
+ *  person objects.
+ *****************************************************************************/
+
+void  Bulk_Insert_Objects()
+{
+  person  *p_array        [ARRAY_SIZE];
+  person_ind *p_ind_array [ARRAY_SIZE];
+
+  int i;
+
+  exec sql allocate :p_array:p_ind_array;
+
+  /* initialize person structs with some dummy data  */
+
+  for (i =0; i < ARRAY_SIZE; i++)
+    load_person_data(p_array[i], p_ind_array[i], i);
+
+  /* Now perform an array insert of the 10 person objects */
+  
+  exec sql insert into persons values (:p_array:p_ind_array);
+  
+  printf("\nInserted %d person objects via host and indicator arrays.\n",
+         sqlca.sqlerrd[2]);
+  return;   
+}
+
+
+/* ***************************************************************************
+ * The following function uses a host and an indicator array to bulk select
+ * multiple person objects.
+ * ***************************************************************************/
+
+void  Bulk_Select_Objects()
+{
+  person     *p_array[ARRAY_SIZE];
+  person_ind *p_ind_array[ARRAY_SIZE];
+  
+  int i;
+
+  exec sql allocate :p_array:p_ind_array;
+
+  exec sql 
+    declare c1 cursor for
+      select value(p) from persons p
+        order by p.name;
+  
+   exec sql open c1;
+   exec sql whenever not found goto :done;
+
+  printf("\nArray select of all persons:\n");
+
+   /* array fetch of multiple person objects */
+
+   while (sqlca.sqlcode == 0)
+     {
+       exec sql fetch c1 into :p_array:p_ind_array;
+
+       for (i=0; i < ARRAY_SIZE; i++ )
+         print_person_details(p_array[i], p_ind_array[i]);
+     }
+  
+ done:
+  
+  /* print the last (partial) array filled by the fetch */ 
+  
+  for (i=0; i < sqlca.sqlerrd[2] % ARRAY_SIZE; i++) 
+    print_person_details(p_array[i], p_ind_array[i]);
+  
+  printf("\nTotal number of person objects fetched by array select : %d.\n", 
+          sqlca.sqlerrd[2]);
+  
+  exec sql close c1;          
+  
+  exec sql free :p_array:p_ind_array;
+  
+  return;    
+}
+
+
+void print_person_details(person *p, person_ind *p_ind) 
+{
+
+  if (p_ind->_atomic == OCI_IND_NULL)
+    {
+      printf(" NULL person");
+      return;
+    }
+
+  {
+    varchar newName[21];
+    int newSSN=0;
+    if(p_ind->name == OCI_IND_NULL)
+      {
+        if(p_ind->ssn == OCI_IND_NULL)
+          printf("\n Person : NULL name\n SSN    : -1");
+        else
+          {
+            EXEC SQL OBJECT GET ssn FROM :p INTO :newSSN;
+            printf("\n Person : NULL name\n SSN    : %d", newSSN);
+          }
+      }
+    else
+      {
+        if(p_ind->ssn == OCI_IND_NULL)
+          {
+            EXEC SQL OBJECT GET name FROM :p INTO :newName;
+            printf("\n Person : %.*s\n SSN    : -1", newName.len, newName.arr);
+          }
+        else
+          {
+            EXEC SQL OBJECT GET name, ssn FROM :p INTO :newName, :newSSN;
+            printf("\n Person : %.*s\n SSN    : %d", newName.len, newName.arr,
+                   newSSN);
+          }
+      }
+  }
+  print_address_details(&(p->addr), &(p_ind->addr));
+}
+
+void print_address_details(address *a, address_ind *a_ind) 
+{
+  varchar street[200], city[20], state[20], zip_code[50];
+  printf("\n Address: \n");
+
+  if (a_ind->_atomic == OCI_IND_NULL)  {
+    printf("  None available.\n");
+    return;
+  }
+
+  strcpy((char *)street.arr, "NULL street");
+  strcpy((char *)city.arr, "NULL city");
+  strcpy((char *)state.arr, "NULL state");
+  strcpy((char *)zip_code.arr, "NULL zip");
+
+  if(a_ind->street != OCI_IND_NULL)
+    {
+      exec sql object get street from :a into :street;
+    }
+  if(a_ind->city != OCI_IND_NULL)
+    {
+      exec sql object get city from :a into :city;
+    }
+  if(a_ind->state != OCI_IND_NULL)
+    {
+      exec sql object get state from :a into :state;
+    }
+  if(a_ind->zip_code != OCI_IND_NULL)
+    {
+      exec sql object get zip_code from :a into :zip_code;
+    }
+
+  printf("  Street: %.*s\n  City:   %.*s\n  State:  %.*s\n  Zip:    %.*s\n",
+         street.len, street.arr,
+         city.len, city.arr,
+         state.len, state.arr,
+         zip_code.len, zip_code.arr);
+}
+
+void load_person_data(person *p, person_ind *p_ind, int i)
+{
+  /* create some dummy data for the person */
+        
+  text name  [20];
+  text street[20];
+  text city  [20];
+  text state [20];
+  text zip   [20];
+  int ssn = 100000 + 10*i;
+  
+  sprintf((char *)name,   "Person %d", i); 
+  sprintf((char *)street, "Street %d", i);
+  sprintf((char *)city,   "City %d",   i);
+  sprintf((char *)state,  "S%d",       i);
+  sprintf((char *)zip,    "Zip%d",     i);
+
+  /* create and load the dummy data into the person struct */
+  
+  exec sql object set name, ssn of :p to :name, :ssn;
+  exec sql object set street, city, state, zip_code 
+    of :p->addr to :street, :city, :state, :zip;
+
+  /* Set the atomic indicator and name of person object to NOT NULL */
+
+  p_ind->_atomic = OCI_IND_NOTNULL;
+  p_ind->name    = OCI_IND_NOTNULL;
+
+  /* Illustrate NULL values for objects and individual attributes */
+  
+  if (i == 2)
+    {
+      /* Pick this person to have a NULL ssn and a NULL address */
+
+      p_ind->ssn           = OCI_IND_NULL;   
+      p_ind->addr._atomic  = OCI_IND_NULL;
+    }
+  else 
+    {
+      p_ind->ssn           = OCI_IND_NOTNULL;
+      p_ind->addr._atomic  = OCI_IND_NOTNULL;
+      p_ind->addr.street   = OCI_IND_NOTNULL;
+      p_ind->addr.city     = OCI_IND_NOTNULL;
+      p_ind->addr.state    = OCI_IND_NOTNULL;
+      p_ind->addr.zip_code = OCI_IND_NOTNULL;
+    }
+}
+
+
+void  Database_Connect( uid )
+  char * uid;
+{
+  printf("\nConnecting as %s...\n", uid);
+  exec sql connect :uid;
+  printf("Connected successfully.\n");
+
+  return;
+}
+
+
+void  print_sql_error( ftl )
+int ftl;
+{
+    char err_msg[128];
+    size_t buf_len, msg_len;
+ 
+    exec sql whenever sqlerror continue;
+ 
+    buf_len = sizeof (err_msg);
+    sqlglm(err_msg, &buf_len, &msg_len);
+    printf("\n%.*s.\n", msg_len, err_msg);
+
+    if (ftl)
+    {
+      exec sql rollback release;
+      exit(EXIT_FAILURE);
+    }
+    else
+      return;
+}
+  

@@ -1,0 +1,132 @@
+
+/*************************************************************
+Sample Program 9:  Calling a stored procedure
+
+This program connects to ORACLE using the SCOTT/TIGER
+account.  The program declares several host arrays, then
+calls a PL/SQL stored procedure (GET_EMPLOYEES in the
+CALLDEMO package) that fills the table OUT parameters.  The
+PL/SQL procedure returns up to ASIZE values.
+
+Sample9 keeps calling GET_EMPLOYEES, getting ASIZE arrays
+each time, and printing the values, until all rows have been
+retrieved.  GET_EMPLOYEES sets the done_flag to indicate "no
+more data."
+
+*************************************************************/
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <sqlda.h>
+#include <sqlcpr.h>
+
+typedef char asciz[20];
+typedef char vc2_arr[11];
+
+EXEC SQL BEGIN DECLARE SECTION;
+/* User-defined type for null-terminated strings */
+EXEC SQL TYPE asciz  IS STRING(20) REFERENCE;
+
+/* User-defined type for a VARCHAR array element. */
+EXEC SQL TYPE vc2_arr IS VARCHAR2(11) REFERENCE;
+
+asciz     username;
+asciz     password;
+int       dept_no;              /* which department to query? */
+vc2_arr   emp_name[10];            /* array of returned names */
+vc2_arr   job[10];
+float     salary[10];
+int       done_flag;
+int       array_size;
+int       num_ret;                 /* number of rows returned */
+EXEC SQL END DECLARE SECTION;
+
+long      SQLCODE;
+
+void print_rows(n)
+    int n;
+{
+    int i;
+
+    if (n == 0)
+    {
+        printf("No rows retrieved.\n");
+        return;
+    }
+
+    for (i = 0; i < n; i++)
+        printf("%10.10s%10.10s%6.2f\n",
+               emp_name[i], job[i], salary[i]);
+}
+
+/* Handle errors. Exit on any error. */
+void sql_error()
+{
+    char msg[512];
+    size_t buf_len, msg_len;
+
+    EXEC SQL WHENEVER SQLERROR CONTINUE;
+
+    buf_len = sizeof(msg);
+    sqlglm(msg, &buf_len, &msg_len);
+
+    printf("\nORACLE error detected:");
+    printf("\n%.*s \n", msg_len, msg);
+
+    EXEC SQL ROLLBACK WORK RELEASE;
+    exit(1);
+}
+
+void main()
+{
+    char  temp_buf[32];
+
+/* Connect to ORACLE. */
+    EXEC SQL WHENEVER SQLERROR DO sql_error();
+
+    strcpy(username, "scott");
+    strcpy(password, "tiger");
+    EXEC SQL CONNECT :username IDENTIFIED BY :password;
+    printf("\nConnected to ORACLE as user: %s\n\n", username);
+
+    printf("Enter department number: ");
+    gets(temp_buf);
+    dept_no = atoi(temp_buf);
+
+/* Print column headers. */
+    printf("\n\n");
+    printf("%-10.10s%-10.10s%s\n", "Employee", "Job", "Salary");
+    printf("%-10.10s%-10.10s%s\n", "--------", "---", "------");
+
+/* Set the array size. */
+    array_size = 10;
+
+    done_flag = 0;
+    num_ret = 0;
+
+/*  Array fetch loop.
+ *  The loop continues until the OUT parameter done_flag is set.
+ *  Pass in the department number, and the array size--
+ *  get names, jobs, and salaries back.
+ */
+    for (;;)
+    {
+        EXEC SQL EXECUTE 
+            BEGIN calldemo.get_employees
+                (:dept_no, :array_size, :num_ret, :done_flag,
+                 :emp_name, :job, :salary);
+            END;
+        END-EXEC;
+
+        print_rows(num_ret);
+
+        if (done_flag)
+            break;
+    }
+
+/* Disconnect from the database. */
+    EXEC SQL COMMIT WORK RELEASE;
+    exit(0);
+}
+

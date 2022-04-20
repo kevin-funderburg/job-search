@@ -1,0 +1,404 @@
+
+            /* ***************************************** */
+            /*   Demo program for Collections in Pro*C   */
+            /* ***************************************** */
+
+/*****************************************************************************
+ 
+   In SQL*Plus, run the SQL script coldemo1.sql to create:
+     - 2 types: city_t (OBJECT) and citytbl_t (NESTED TABLE)
+     - 1 relational table county_tbl which contains a citytbl_t nested table
+  
+   Next, run the Object Type Translator (OTT) to generate typedefs of C structs
+   corresponding to the city_t and citytbl_t types in the databases:
+     ott int=coldemo1.typ outt=out.typ hfile=coldemo1.h code=c user=scott/tiger
+  
+   Then, run the Pro*C/C++ Precompiler as follows:
+     proc coldemo1 intype=out.typ
+  
+   Finally, link the generated code using the Pro*C Makefile:
+     (Compiling and Linking applications is a platform dependent step).
+  
+ ****************************************************************************
+ 
+   Scenario: 
+     We consider the example of a database used to store census 
+     information for the state of California.  The database has a table
+     representing the counties of California.  Each county has a name 
+     and a collection of cities.  Each city has a name and a population.
+
+   Application Overview:
+     This example demonstrates three ways for the Pro*C client to 
+     navigate through collection-typed database columns.  Although the
+     examples presented use nested tables, they also apply to varrays.
+     Collections-specific functionality is demonstrated in three
+     different functions, as described below.
+        
+     PrintCounties shows examples of 
+     * Declaring collection-typed host variables and arrays
+     * Allocating and freeing collection-typed host variables
+     * Using SQL to load a collection-typed host variable
+     * Using indicators for collection-typed host variables
+     * Using OCI to examine a collection-typed host variables
+
+     PrintCounty shows examples of 
+     * Binding a ref cursor host variable to a nested table column
+     * Allocating and freeing a ref cursor
+     * Using the SQL "CURSOR" clause
+
+     CountyPopulation shows examples of 
+     * Binding a "DECLARED" cursor to a nested table column
+     * Using the SQL "THE" clause
+
+****************************************************************************/
+
+/* Include files */
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <sqlca.h>                                /* SQL Communications Area */
+#include <coldemo1.h>        /* OTT-generated header with C typedefs for the */
+                                      /* database types city_t and citytbl_t */
+#ifndef EXIT_SUCCESS
+# define EXIT_SUCCESS   0
+#endif
+#ifndef EXIT_FAILURE
+# define EXIT_FAILURE   1
+#endif 
+
+#define CITY_NAME_LEN    30
+#define COUNTY_NAME_LEN  30
+#define MAX_COUNTIES     60
+
+/* Function prototypes */
+
+#if defined(__STDC__)
+ void OptionLoop( void );
+ boolean GetCountyName( char *countyName );
+ void PrintCounties( void );
+ long CountyPopulation( CONST char *countyName );
+ void PrintCounty( CONST char *countyName );
+ void PrintSQLError( void );
+ void PrintCountyHeader( CONST char *county );
+ void PrintCity( city_t *city );
+#else
+ void OptionLoop();
+ boolean GetCountyName(/*_ char *countyName _*/);
+ void PrintCounties();
+ long CountyPopulation(/*_ CONST char *countyName _*/);
+ void PrintCounty(/*_ CONST char *countyName _*/);
+ void PrintSQLError(/*_ void _*/);
+ void PrintCountyHeader(/*_ CONST char *county _*/);
+ void PrintCity(/*_ city_t *city _*/);
+#endif
+
+/* 
+ * NAME
+ *   main
+ * COLLECTION FEATURES
+ *   none
+ */
+int main()
+{
+  char * uid = "scott/tiger";
+  
+  EXEC SQL WHENEVER SQLERROR DO PrintSQLError();
+
+  printf("\nPro*Census: Release California - Jan 1 1996.\n");
+  EXEC SQL CONNECT :uid;
+  
+  OptionLoop();
+
+  printf("\nGoodbye\n\n");
+  EXEC SQL ROLLBACK RELEASE;
+  return(EXIT_SUCCESS);
+}
+
+/* 
+ * NAME
+ *   OptionLoop
+ * DESCRIPTION
+ *   A command dispatch routine.
+ * COLLECTION FEATURES
+ *   none
+ */
+void OptionLoop()
+{
+  char choice[30];
+  boolean done = FALSE;
+  char countyName[COUNTY_NAME_LEN + 1];
+
+  while (!done)
+  {
+    printf("\nPro*Census options:\n");
+    printf("\tlist information for (A)ll counties\n");
+    printf("\tlist information for one (C)ounty\n");
+    printf("\tlist (P)opulation total for one county\n");
+    printf("\t(Q)uit\n");
+    printf("Choice? ");
+
+    fgets(choice, 30, stdin);
+    switch(toupper(choice[0]))
+    {
+    case 'A':
+      PrintCounties();
+      break;
+    case 'C':
+      if (GetCountyName(countyName)) 
+        PrintCounty(countyName);
+      break;
+    case 'P':
+      if (GetCountyName(countyName)) 
+        printf("\nPopulation for %s county: %ld\n", 
+               countyName, CountyPopulation(countyName));
+      break;
+    case 'Q':
+      done = TRUE;
+      break;
+    default:
+      break;
+    }
+  }
+}
+
+
+/* 
+ * NAME
+ *   GetCountyName
+ * DESCRIPTION
+ *   Fills the passed buffer with a client-supplied county name.
+ *   Returns TRUE if the county is in the database, and FALSE otherwise.
+ * COLLECTION FEATURES
+ *   none
+ */
+boolean GetCountyName(countyName)
+  char *countyName;
+{
+  int   count;
+  int   i;
+
+  printf("County name? ");
+  fgets(countyName, COUNTY_NAME_LEN + 1, stdin);
+
+  /* Convert the name to uppercase and remove the trailing '\n' */
+  for (i = 0; countyName[i] != '\0'; i++)
+    {
+      countyName[i] = (char)toupper(countyName[i]);
+      if (countyName[i] == '\n') countyName[i] = '\0';
+    }
+
+  EXEC SQL SELECT COUNT(*) INTO :count 
+    FROM county_tbl WHERE name = :countyName;
+
+  if (count != 1)
+    {
+      printf("\nUnable to find %s county.\n", countyName);
+      return FALSE;
+    }
+  else
+    return TRUE;
+}
+
+
+/* 
+ * NAME
+ *   PrintCounties
+ * DESCRIPTION
+ *   Prints the population and name of each city of every county 
+ *   in the database.
+ * COLLECTION FEATURES
+ *   The following features correspond to the inline commented numbers
+ *   1) Host variables for collection-typed objects are declared using 
+ *      OTT-generated types.  Both array and scalar declarations are allowed.
+ *      Scalar declarations must be of type pointer-to-collection-type, and
+ *      array declarations must of type array-of-pointer-to-collection-type.
+ *   2) SQL ALLOCATE should be used to allocate space for the collection.
+ *      SQL FREE should be used to free the memory once the collection is
+ *      no longer needed.  The host variable being allocated or free'd 
+ *      can be either array or scalar.
+ *   3) SQL is used to load into or store from collection-typed host variables
+ *      and arrays.  No special syntax is needed.
+ *   4) The type of an indicator variable for a collection is OCIInd.
+ *      An indicators for a collections is declared and used just like
+ *      an indicator for an int or string.
+ *   5) The COLLECTION GET Interface is used to access and manipulate the
+ *      contents of collection-typed host variables.  Each member of the
+ *      collection used here has type city_t, as generated by OTT.
+ */
+void PrintCounties()
+{
+  citytbl_t *cityTable[MAX_COUNTIES];                                 /* 1 */
+  OCIInd     cityInd[MAX_COUNTIES];                                   /* 4 */
+  char       county[MAX_COUNTIES][COUNTY_NAME_LEN + 1];
+  int        i, numCounties;
+  city_t    *city;
+
+  EXEC SQL ALLOCATE :cityTable;                                       /* 2 */
+  EXEC SQL ALLOCATE :city;
+  
+  EXEC SQL SELECT name, cities
+    INTO :county, :cityTable:cityInd FROM county_tbl;              /* 3, 4 */
+
+  numCounties = sqlca.sqlerrd[2];
+
+  for (i = 0; i < numCounties; i++) 
+  {
+    if (cityInd[i] == OCI_IND_NULL)                                   /* 4 */
+      {
+        printf("Unexpected NULL city table for %s county\n", county[i]);
+      }
+    else
+      {                                                               /* 5 */
+        PrintCountyHeader(county[i]);
+        EXEC SQL WHENEVER NOT FOUND DO break;
+        while (TRUE)
+          {
+            EXEC SQL COLLECTION GET :cityTable[i] INTO :city;
+            PrintCity(city);
+          }
+        EXEC SQL WHENEVER NOT FOUND CONTINUE;
+      }
+  }
+
+  EXEC SQL FREE :city;
+  EXEC SQL FREE :cityTable;                                           /* 2 */
+}
+
+
+/* 
+ * NAME
+ *   PrintCountyHeader
+ * COLLECTION FEATURES
+ *   none
+ */
+void PrintCountyHeader(county)
+  CONST char *county;
+{
+  printf("\nCOUNTY: %s\n", county);
+}
+
+/* 
+ * NAME
+ *   PrintCity
+ * COLLECTION FEATURES
+ *   none
+ */
+void PrintCity(city)
+  city_t *city;
+{
+  varchar newCITY[CITY_NAME_LEN];
+  int newPOP;
+
+  EXEC SQL OBJECT GET NAME, POPULATION from :city INTO :newCITY, :newPOP;
+  printf("CITY: %.*s POP: %d\n", CITY_NAME_LEN, newCITY.arr, newPOP);
+}
+
+/* 
+ * NAME
+ *   PrintCounty
+ * DESCRIPTION
+ *   Prints the population and name of each city in a particular county.
+ * COLLECTION FEATURES
+ *   The following features correspond to the inline commented numbers
+ *   1) A ref cursor host variable may be used to scroll through the 
+ *      rows of a collection. 
+ *   2) Use SQL ALLOCATE/FREE to create and destroy the ref cursor.
+ *   3) The "CURSOR" clause in SQL can be used to load a ref cursor 
+ *      host variable.  In such a case, the SELECT ... INTO does an
+ *      implicit "OPEN" of the ref cursor.
+ * IMPLEMENTATION NOTES 
+ *   In the case of SQL SELECT statements which contain an embedded 
+ *   CURSOR(...) clause, the Pro*C "select_error" flag must be "no"
+ *   to prevent cancellation of the parent cursor.
+ */
+void PrintCounty(countyName)
+  CONST char *countyName;
+{
+  sql_cursor cityCursor;                                              /* 1 */
+  city_t *city;
+
+  EXEC SQL ALLOCATE :cityCursor;                                      /* 2 */
+  EXEC SQL ALLOCATE :city;                                        
+  
+  EXEC ORACLE OPTION(select_error=no);
+  EXEC SQL SELECT 
+    CURSOR(SELECT VALUE(c) FROM TABLE(county_tbl.cities) c)
+      INTO :cityCursor 
+      FROM county_tbl
+      WHERE county_tbl.name = :countyName;                            /* 3 */
+  EXEC ORACLE OPTION(select_error=yes);
+  
+  PrintCountyHeader(countyName);
+
+  EXEC SQL WHENEVER NOT FOUND DO break;
+  while (TRUE)
+    {
+      EXEC SQL FETCH :cityCursor INTO :city;
+      PrintCity(city);
+    }
+  EXEC SQL WHENEVER NOT FOUND CONTINUE;
+
+  EXEC SQL CLOSE :cityCursor;
+
+  EXEC SQL FREE :cityCursor;                                         /* 2 */
+  EXEC SQL FREE :city; 
+}
+
+
+/* 
+ * NAME
+ *   CountyPopulation
+ * DESCRIPTION
+ *   Returns the number of people living in a particular county.
+ * COLLECTION FEATURES
+ *   The following features correspond to the inline commented numbers
+ *   1) A "DECLARED" cursor may be used to scroll through the 
+ *      rows of a collection. 
+ *   2) The "THE" clause in SQL is used to convert a single nested-table
+ *      column into a table.
+ */
+long CountyPopulation(countyName)
+  CONST char *countyName;
+{
+  long population;
+  long populationTotal = 0;
+
+  EXEC SQL DECLARE cityCursor CURSOR FOR
+    SELECT c.population 
+    FROM THE(SELECT cities FROM county_tbl 
+              WHERE name = :countyName) AS c;                     /* 1, 2 */
+
+  EXEC SQL OPEN cityCursor;
+
+  EXEC SQL WHENEVER NOT FOUND DO break;
+  while (TRUE)
+    {
+      EXEC SQL FETCH cityCursor INTO :population;
+      populationTotal += population;
+    }
+  EXEC SQL WHENEVER NOT FOUND CONTINUE;
+
+  EXEC SQL CLOSE cityCursor;
+  return populationTotal;
+}
+
+
+/* 
+ * NAME
+ *   PrintSQLError
+ * DESCRIPTION
+ *   Prints an error message using info in sqlca and calls exit.
+ * COLLECTION FEATURES
+ *   none
+ */ 
+void PrintSQLError()
+{
+  EXEC SQL WHENEVER SQLERROR CONTINUE;
+  printf("SQL error occurred...\n");
+  printf("%.*s\n", (int)sqlca.sqlerrm.sqlerrml,
+         (CONST char *)sqlca.sqlerrm.sqlerrmc);
+  EXEC SQL ROLLBACK RELEASE;
+  exit(EXIT_FAILURE);
+}
+

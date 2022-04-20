@@ -1,0 +1,55 @@
+
+This file contains information to set up the environment for the Object 
+Type Translator (OTT) to be used with the object sample programs in the 
+PRECOMP demo proc directory.  
+
+Make sure that the Object Type Translator (OTT) utility can be invoked 
+from the command line prompt, and produces the expected output:
+
+% ott
+
+OTT: Release 9.0.0.0.0 - Production on ...
+
+(c) Copyright 2001 Oracle Corporation.  All rights reserved.
+
+System default option values taken from: .../precomp/admin/ottcfg.cfg
+
+Option Name    Current Value  Description
+-------------------------------------------------------------------------------
+attraccess     protected      access for generated attributes [*]
+case           same           what kind of case conversion to do when translating database names
+code           *none*         the host language for which code is to be generated
+config         *none*         the name of the configuration and parameter specification file
+cppfile        *none*         the name of the source file for C++ method implementations [*]
+errtype        *none*         the name of the listing file for type file error messages
+hfile          *none*         the name of the default include file for generated declarations
+initfile       *none*         the name of the source file for the initialization function
+initfunc       *none*         the name of the initialization function
+intype         *none*         the name of the input file for type information
+mapfile        *none*         the name of the source file for the map registering function [*]
+mapfunc        *none*         the name of the map registering function [*]
+outdir         *none*         the directory in which generated source files are placed
+outtype        *none*         the name of the output file for type information
+schema_names   always         when to write schema names in the outtype file
+transitive     true           should type dependencies not mentioned in the intype file be translated
+userid         *none*         a username/password [@dbname] connect string
+
+"[*]" indicates this option legal only for the C++ host language (code=cpp)
+
+If this expected output is not obtained, please check your environment settings
+for PATH, CLASSPATH, and LD_LIBRARY_PATH:
+
+   * PATH should include the directory .../bin (location of ott)
+   * PATH should include /usr/local/packages/jdk1.1.6/bin before /bin.
+   * CLASSPATH should include the file .../sqlj/lib/translator.zip
+   * CLASSPATH should include the file .../sqlj/lib/runtime.zip
+     (If you use JDBC 8.1.7 you can also use use runtime11.zip or
+      runtime12.zip, depending on your JDK version.)
+   * CLASSPATH should include the file .../jdbc/lib/classes111.zip
+   * CLASSPATH should include the file .../jdbc/lib/nls_charset11.zip
+   * The location of the ocijdbc9 dynamic library (.so, or .dll, depending on 
+     the platform) should be included in LD_LIBRARY_PATH (Solaris) or in 
+     PATH (NT).  The location of libocijdbc9 is .../lib.
+
+In addition, a JDK 1.1-compatible Java compiler (assumed to be javac) and the
+java interpreter (assumed java) must be correctly installed.

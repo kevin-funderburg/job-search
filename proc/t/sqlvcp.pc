@@ -1,0 +1,146 @@
+/*
+ *  The sqlvcp.pc program demonstrates how you can use the
+ *  sqlvcp() function to determine the actual size of a
+ *  VARCHAR struct. The size is then used as an offset to
+ *  increment a pointer that steps through an array of
+ *  VARCHARs.
+ *
+ *  This program also demonstrates the use of the sqlgls()
+ *  function, to get the text of the last SQL statement executed.
+ *  sqlgls() is described in the "Error Handling" chapter of
+ *  _The Programmer's Guide to the Oracle Pro*C Precompiler_.
+ */
+
+#include <stdio.h> 
+#include <stdlib.h>
+#include <sqlca.h>
+#include <sqlda.h> 
+#include <sqlcpr.h>
+
+/* Fake a varchar pointer type. */ 
+
+struct my_vc_ptr 
+{ 
+    unsigned short len; 
+    unsigned char arr[32767]; 
+}; 
+
+/* Define a type for the varchar pointer */
+typedef struct my_vc_ptr my_vc_ptr; 
+my_vc_ptr *vc_ptr; 
+
+EXEC SQL BEGIN DECLARE SECTION; 
+  varchar *names;    /* varchar can be in lower case */ 
+  int      limit;    /* for use in FETCH FOR clause  */ 
+  char    *username = "scott/tiger"; 
+EXEC SQL END DECLARE SECTION; 
+ 
+void sql_error() 
+{ 
+    char err_msg[512]; 
+    size_t buf_len, msg_len;
+     
+    EXEC SQL WHENEVER SQLERROR CONTINUE; 
+ 
+    buf_len = (size_t) sizeof (err_msg); 
+    sqlglm(err_msg, &buf_len, &msg_len); 
+    printf("%.*s\n", msg_len, err_msg); 
+ 
+    EXEC SQL ROLLBACK RELEASE; 
+    exit(EXIT_FAILURE); 
+} 
+
+void main() 
+{ 
+    unsigned int vcplen, padlen; 
+    size_t buflen, function_code;
+    int i; 
+    char stmt_buf[120]; 
+
+    EXEC SQL WHENEVER SQLERROR DO sql_error(); 
+
+    EXEC SQL CONNECT :username; 
+    printf("\nConnected.\n"); 
+     
+/* Find number of rows in table. */ 
+    EXEC SQL SELECT COUNT(*) INTO :limit FROM emp; 
+     
+    
+/* Declare a cursor for the FETCH statement. */ 
+    EXEC SQL DECLARE emp_name_cursor CURSOR FOR 
+    SELECT ename FROM emp; 
+    EXEC SQL FOR :limit OPEN emp_name_cursor; 
+     
+/* Set the desired DATA length for the VARCHAR. */ 
+    vcplen = 10; 
+     
+/*Use SQLVCP to help find the length to malloc. */ 
+    sqlvcp((unsigned long *)&vcplen, (unsigned long *)&padlen); 
+    printf("Actual array length of varchar is %ld\n", padlen); 
+     
+/* Allocate the names buffer for names. 
+    Set the limit variable for the FOR clause. */ 
+    names = (varchar *) malloc((sizeof (short) + 
+    (unsigned int) padlen) * limit); 
+    if (names == 0) 
+    { 
+        printf("Memory allocation error.\n"); 
+        exit(EXIT_FAILURE); 
+    } 
+    
+/*  Set the maximum lengths before the FETCH. 
+ *  Note the "trick" to get an effective varchar *.
+ */ 
+    for (vc_ptr = (my_vc_ptr *) names, i = 0; i < limit; i++) 
+    { 
+        vc_ptr->len = (short) padlen; 
+        vc_ptr = (my_vc_ptr *)((char *) vc_ptr + 
+        padlen + sizeof (short)); 
+    } 
+    
+/* Execute the FETCH. */ 
+    EXEC SQL FOR :limit FETCH emp_name_cursor INTO :names; 
+     
+/* Print the results. */ 
+    printf("Employee names--\n"); 
+    
+    for (vc_ptr = (my_vc_ptr *) names, i = 0; i < limit; i++) 
+    { 
+        printf("%.*s\t(%d)\n", vc_ptr->len, vc_ptr->arr, vc_ptr->len); 
+        vc_ptr = (my_vc_ptr *)((char *) vc_ptr + 
+                  padlen + sizeof (short)); 
+    } 
+     
+/*  Get statistics about the most recent 
+ *  SQL statement using SQLGLS. Note that 
+ *  the most recent statement in this example 
+ *  is not a FETCH, but rather "SELECT ENAME FROM EMP" 
+ *  (the cursor).
+ */ 
+    buflen = (size_t) sizeof (stmt_buf); 
+    
+/* The returned value should be 1, indicating no error. */ 
+    sqlgls(stmt_buf, (size_t *) &buflen, (size_t *) &function_code);
+    if (buflen != 0)
+    { 
+        /* Print out the SQL statement. */ 
+        printf("The SQL statement was--\n%.*s\n", buflen, stmt_buf); 
+     
+        /* Print the returned length. */ 
+        printf("The statement length is %ld\n", buflen); 
+     
+        /* Print the attributes. */ 
+        printf("The function code is %ld\n", function_code); 
+    
+        EXEC SQL COMMIT RELEASE; 
+        exit(EXIT_SUCCESS); 
+    } 
+    else 
+    { 
+        printf("The SQLGLS function returned an error.\n"); 
+        EXEC SQL ROLLBACK RELEASE; 
+        exit(EXIT_FAILURE); 
+    } 
+} 
+
+
