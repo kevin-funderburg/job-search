@@ -42,7 +42,7 @@ sub query_job{
 	}
 	$string = $string."min_salary=$s1"; 
 
-	$comfile = "/home/Faculty/wp01/public_html/demo/proc/unix-version/c++/ematch_job \"$string\" 1";
+	$comfile = "/home/Students/kf1127/public_html/demo/proc/unix-version/c++/ematch_job \"$string\" 1";
 
 	print "command: $comfile\n";
 # #

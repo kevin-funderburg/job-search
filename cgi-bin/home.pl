@@ -13,7 +13,7 @@ $ENV{'ORACLE_SID'} = 'orclfire';
 
 # Get the current job and member amount
 
-$tuple_counts = `/home/Faculty/wp01/public_html/demo/proc/unix-version/c++/real_time_number`;
+$tuple_counts = `/home/Students/kf1127/public_html/demo/proc/unix-version/c++/real_time_number`;
 #$tuple_counts = `/home/Faculty/peng/public_html/cgi-bin/real_time_number`;
 @array = split(" ", $tuple_counts);
 $job_amount = $array[0];
