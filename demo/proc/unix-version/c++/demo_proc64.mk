@@ -207,21 +207,21 @@ navdemo1.o: navdemo1.pc navdemo1.typ navdemo1-sql
 	$(C2O_64)
 
 ematch_job.o: ematch_job.pc
-	$(MAKE) -f $(MAKEFILE) PROCFLAGS="sqlcheck=syntax user=yourOracleUserName/yourOraclePasswd@csdbora CPP_SUFFIX=cxx $(PROCPPFLAGS)" PCCSRC=$* I_SYM=include= pc1
+	$(MAKE) -f $(MAKEFILE) PROCFLAGS="sqlcheck=syntax user=KF1127/Vatoburg311@csdbora CPP_SUFFIX=cxx $(PROCPPFLAGS)" PCCSRC=$* I_SYM=include= pc1
 	$(CPLUSPLUS) -c $(INCLUDE) $*.cxx
 
 ematch_job: ematch_job.o ematch_class.o my_string_class.o
 	$(CPLUSPLUS) -o $@ $(EMATCHJOBFILES) $(LDPATHFLAG)$(LIBHOME) $(PROLDLIBS)
 
 real_time_number.o: real_time_number.pc
-	$(MAKE) -f $(MAKEFILE) PROCFLAGS="sqlcheck=syntax user=yourOracleUserName/yourOraclePasswd@csdbora CPP_SUFFIX=cxx $(PROCPPFLAGS)" PCCSRC=$* I_SYM=include= pc1
+	$(MAKE) -f $(MAKEFILE) PROCFLAGS="sqlcheck=syntax user=KF1127/Vatoburg311@csdbora CPP_SUFFIX=cxx $(PROCPPFLAGS)" PCCSRC=$* I_SYM=include= pc1
 	$(CPLUSPLUS) -c $(INCLUDE) $*.cxx
 
 real_time_number: real_time_number.o ematch_class.o my_string_class.o
 	$(CPLUSPLUS) -o $@ $(REALTIMENUMBERFILES) $(LDPATHFLAG)$(LIBHOME) $(PROLDLIBS)
 
 verify_member.o: verify_member.pc
-	$(MAKE) -f $(MAKEFILE) PROCFLAGS="sqlcheck=syntax user=yourOracleUserName/yourOraclePasswd@csdbora CPP_SUFFIX=cxx $(PROCPPFLAGS)" PCCSRC=$* I_SYM=include= pc1
+	$(MAKE) -f $(MAKEFILE) PROCFLAGS="sqlcheck=syntax user=KF1127/Vatoburg311@csdbora CPP_SUFFIX=cxx $(PROCPPFLAGS)" PCCSRC=$* I_SYM=include= pc1
 	$(CPLUSPLUS) -c $(INCLUDE) $*.cxx
 
 verify_m_or_e.o: verify_m_or_e.pc
@@ -234,5 +234,5 @@ MAKEFILE=$(ORACLE_HOME)/precomp/demo/proc/demo_proc64.mk
 OTTFLAGS=$(PCCFLAGS)
 PROCPLSFLAGS=sqlcheck=syntax userid=$(USERID)
 PROCPPFLAGS=code=cpp $(CPLUS_SYS_INCLUDE)
-USERID=yourOracleUserName/yourOraclePasswd@csdbora
+USERID=KF1127/Vatoburg311@csdbora
 INCLUDE=$(I_SYM). $(I_SYM)$(PRECOMPHOME)public $(I_SYM)$(RDBMSHOME)public $(I_SYM)$(RDBMSHOME)demo $(I_SYM)$(PLSQLHOME)public $(I_SYM)$(NETWORKHOME)public

@@ -434,7 +434,7 @@
 /*#define USERNAME "your_oracle_account_name@orclfire"
 #define PASSWORD "your_oracle_account_password"
 */
-#define ORACLE_CREDENTIAL "your_oracle_account_name/your_oracle_account_password@csdbora"
+#define ORACLE_CREDENTIAL "KF1127/Vatoburg311@csdbora"
 
 #define MAX_SQL_STATEMENT_LENGTH		 2000
 #define MAX_VALUE_LIST_LENGTH 		 	 1000
